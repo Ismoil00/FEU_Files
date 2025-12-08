@@ -1,0 +1,849 @@
+[
+  {
+    "code": 2,
+    "parent_id": null,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы",
+      "tj": null
+    }
+  },
+  {
+    "code": 21,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Оплата труда работников",
+      "tj": null
+    }
+  },
+  {
+    "code": 211,
+    "parent_id": 21,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Оплата труда работников и налоговые отчисления",
+      "tj": null
+    }
+  },
+  {
+    "code": 2111,
+    "parent_id": 211,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Заработная плата",
+      "tj": null
+    }
+  },
+  {
+    "code": 212,
+    "parent_id": 21,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Налоговые отчисления",
+      "tj": null
+    }
+  },
+  {
+    "code": 2121,
+    "parent_id": 212,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Взносы отчисления на социальные нужды",
+      "tj": null
+    }
+  },
+  {
+    "code": 22,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы на товары и услуги",
+      "tj": null
+    }
+  },
+  {
+    "code": 221,
+    "parent_id": 22,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Приобретение товаров и услуг",
+      "tj": null
+    }
+  },
+  {
+    "code": 2211,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Товарно-материальные запасы",
+      "tj": null
+    }
+  },
+  {
+    "code": 2212,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Приобретение технических товаров",
+      "tj": null
+    }
+  },
+  {
+    "code": 2213,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Горюче-смазочные материалы",
+      "tj": null
+    }
+  },
+  {
+    "code": 2214,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Текущие расходы, кроме ремонта",
+      "tj": null
+    }
+  },
+  {
+    "code": 2215,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Текущий ремонт",
+      "tj": null
+    }
+  },
+  {
+    "code": 2216,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Оплата услуг специалистов",
+      "tj": null
+    }
+  },
+  {
+    "code": 2217,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Оплата за коммунальные услуги",
+      "tj": null
+    }
+  },
+  {
+    "code": 2218,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Оплата за услуги связи",
+      "tj": null
+    }
+  },
+  {
+    "code": 2219,
+    "parent_id": 221,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Товары и услуги, не отнесенные к другим категориям",
+      "tj": null
+    }
+  },
+  {
+    "code": 23,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы на выплату процентов",
+      "tj": null
+    }
+  },
+  {
+    "code": 231,
+    "parent_id": 23,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Проценты",
+      "tj": null
+    }
+  },
+  {
+    "code": 2311,
+    "parent_id": 231,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Проценты нерезидентам",
+      "tj": null
+    }
+  },
+  {
+    "code": 2312,
+    "parent_id": 231,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Проценты резидентам, кроме сектора государственного управления",
+      "tj": null
+    }
+  },
+  {
+    "code": 2313,
+    "parent_id": 231,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Проценты единицам сектора государственного управления",
+      "tj": null
+    }
+  },
+  {
+    "code": 24,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы на выплаты субсидий",
+      "tj": null
+    }
+  },
+  {
+    "code": 241,
+    "parent_id": 24,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Государственным корпорациям (организациям)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2411,
+    "parent_id": 241,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Финансовые и нефинансовые государственные корпорации (организациям)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2412,
+    "parent_id": 241,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Частным корпорациям (организациям)",
+      "tj": null
+    }
+  },
+  {
+    "code": 25,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы на выделение грантов",
+      "tj": null
+    }
+  },
+  {
+    "code": 251,
+    "parent_id": 25,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Гранты",
+      "tj": null
+    }
+  },
+  {
+    "code": 2511,
+    "parent_id": 251,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Иностранным Правительствам",
+      "tj": null
+    }
+  },
+  {
+    "code": 2512,
+    "parent_id": 251,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Международным организациям (текущие)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2513,
+    "parent_id": 251,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Международным организациям (капитальные)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2514,
+    "parent_id": 251,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Другим единицам сектора государственного управления (текущие)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2515,
+    "parent_id": 251,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Другим единицам сектора государственного управления (капитальные)",
+      "tj": null
+    }
+  },
+  {
+    "code": 26,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы на пособия социального обеспечение и помощи",
+      "tj": null
+    }
+  },
+  {
+    "code": 261,
+    "parent_id": 26,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Пособия",
+      "tj": null
+    }
+  },
+  {
+    "code": 2611,
+    "parent_id": 261,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Пособия по социальному обеспечению",
+      "tj": null
+    }
+  },
+  {
+    "code": 2612,
+    "parent_id": 261,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Пособия по социальной помощи",
+      "tj": null
+    }
+  },
+  {
+    "code": 27,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Другие расходы",
+      "tj": null
+    }
+  },
+  {
+    "code": 271,
+    "parent_id": 27,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы, связанные с собственностью, кроме процентов",
+      "tj": null
+    }
+  },
+  {
+    "code": 2711,
+    "parent_id": 271,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Расходы, связанные с собственностью, вмененные держателям страховых полисов ",
+      "tj": null
+    }
+  },
+  {
+    "code": 2712,
+    "parent_id": 271,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Расходы на ренту",
+      "tj": null
+    }
+  },
+  {
+    "code": 2713,
+    "parent_id": 271,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Расходы на страхование зданий и оборудования ",
+      "tj": null
+    }
+  },
+  {
+    "code": 2714,
+    "parent_id": 271,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Другие расходы, не отнесенные к другим подразделам 27100.",
+      "tj": null
+    }
+  },
+  {
+    "code": 272,
+    "parent_id": 27,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Различные прочие расходы",
+      "tj": null
+    }
+  },
+  {
+    "code": 2721,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Стипендии",
+      "tj": null
+    }
+  },
+  {
+    "code": 2722,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Пенсии",
+      "tj": null
+    }
+  },
+  {
+    "code": 2723,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Компенсации на продукты питания",
+      "tj": null
+    }
+  },
+  {
+    "code": 2724,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Компенсация на другие товары",
+      "tj": null
+    }
+  },
+  {
+    "code": 2725,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Оплата штрафов и пени",
+      "tj": null
+    }
+  },
+  {
+    "code": 2726,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Трансферты некоммерческим организациям",
+      "tj": null
+    }
+  },
+  {
+    "code": 2727,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Единовременная компенсация",
+      "tj": null
+    }
+  },
+  {
+    "code": 2728,
+    "parent_id": 272,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Трансферты, не отнесенные к другим категориям",
+      "tj": null
+    }
+  },
+  {
+    "code": 273,
+    "parent_id": 27,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Расходы на капитальные цели",
+      "tj": null
+    }
+  },
+  {
+    "code": 2731,
+    "parent_id": 273,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Внутренние капитальные трансферты нефинансовым государственным предприятиям",
+      "tj": null
+    }
+  },
+  {
+    "code": 2732,
+    "parent_id": 273,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Внутренние капитальные трансферты государственным финансовым учреждениям",
+      "tj": null
+    }
+  },
+  {
+    "code": 2733,
+    "parent_id": 273,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Внутренние капитальные трансферты нефинансовым частным предприятиям",
+      "tj": null
+    }
+  },
+  {
+    "code": 2734,
+    "parent_id": 273,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Внутренние капитальные трансферты частным финансовым предприятиям",
+      "tj": null
+    }
+  },
+  {
+    "code": 2735,
+    "parent_id": 273,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Внутренние капитальные трансферты, не отнесенные к другим категориям",
+      "tj": null
+    }
+  },
+  {
+    "code": 28,
+    "parent_id": 2,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Операции с активами и обязательствами",
+      "tj": null
+    }
+  },
+  {
+    "code": 281,
+    "parent_id": 28,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Операции с нефинансовыми активами",
+      "tj": null
+    }
+  },
+  {
+    "code": 2811,
+    "parent_id": 281,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Здания и сооружения (жилые помещения)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2812,
+    "parent_id": 281,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Здания и сооружения (нежилые помещения)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2813,
+    "parent_id": 281,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Здания и сооружения (прочие сооружения)",
+      "tj": null
+    }
+  },
+  {
+    "code": 2814,
+    "parent_id": 281,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Машины и оборудование",
+      "tj": null
+    }
+  },
+  {
+    "code": 2815,
+    "parent_id": 281,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Нематериальные основные фонды",
+      "tj": null
+    }
+  },
+  {
+    "code": 2816,
+    "parent_id": 281,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Запасы материальных оборотных средств",
+      "tj": null
+    }
+  },
+  {
+    "code": 2817,
+    "parent_id": 281,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Непроизводственные активы",
+      "tj": null
+    }
+  },
+  {
+    "code": 282,
+    "parent_id": 28,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Приобретение внутренних финансовых активов",
+      "tj": null
+    }
+  },
+  {
+    "code": 2821,
+    "parent_id": 282,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Увеличение остатков по валюте и депозитам",
+      "tj": null
+    }
+  },
+  {
+    "code": 2822,
+    "parent_id": 282,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Кредитование и приобретение акций",
+      "tj": null
+    }
+  },
+  {
+    "code": 283,
+    "parent_id": 28,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Приобретение внешних финансовых активов",
+      "tj": null
+    }
+  },
+  {
+    "code": 2831,
+    "parent_id": 283,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Увеличение остатков по валюте и депозитам",
+      "tj": null
+    }
+  },
+  {
+    "code": 2832,
+    "parent_id": 283,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Внешнее кредитование",
+      "tj": null
+    }
+  },
+  {
+    "code": 284,
+    "parent_id": 28,
+    "debit": null,
+    "credit": null,
+    "isEstimate": false,
+    "name": {
+      "ru": "Погашение внутренних финансовых обязательств",
+      "tj": null
+    }
+  },
+  {
+    "code": 2841,
+    "parent_id": 284,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Погашение ценных бумаг, кроме акций",
+      "tj": null
+    }
+  },
+  {
+    "code": 2842,
+    "parent_id": 284,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Выплаты кредитов и ссуд",
+      "tj": null
+    }
+  },
+  {
+    "code": 2843,
+    "parent_id": 284,
+    "debit": null,
+    "credit": null,
+    "isEstimate": true,
+    "name": {
+      "ru": "Погашение внешних финансовых обязательств",
+      "tj": null
+    }
+  }
+]
