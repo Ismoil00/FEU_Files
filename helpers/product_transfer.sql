@@ -49,12 +49,12 @@ AS $BODY$
 		FOR _product IN SELECT * FROM jsonb_array_elements((jdata->>'table_data')::jsonb) LOOP
 			if (_product->>'id')::bigint is null then
 				perform accounting.warehouse_product_amount_validation(
-				    _from_storage_location_id,
+				   _from_storage_location_id,
 				   (_product->>'name_id')::bigint,
 				   (_product->>'import_id')::bigint,
-				    (_product->>'quantity')::numeric,
-				    (_product->>'unit_price')::numeric,
-				    _financing
+				   (_product->>'quantity')::numeric,
+				   (_product->>'unit_price')::numeric,
+				   _financing
 				);
 			
 				insert into accounting.product_transfer (
@@ -100,19 +100,19 @@ AS $BODY$
 			else
 				isUpdate = true;
 				update accounting.product_transfer ie SET				
-					from_storage_location_id = _from_storage_location_id,
-					to_storage_location_id = _to_storage_location_id,
+					-- from_storage_location_id = _from_storage_location_id,
+					-- to_storage_location_id = _to_storage_location_id,
 					main_department_id  = _main_department_id,
 					comment = _comment,
 					financing = _financing,
 					
 					/* table data */
-					debit = (_product->>'debit')::int,
-					credit = (_product->>'credit')::int,
-					name_id = (_product->>'name_id')::bigint,
-					quantity = (_product->>'quantity')::numeric,
-					unit_price = (_product->>'unit_price')::numeric,
-					import_id = (_product->>'import_id')::bigint,
+					-- debit = (_product->>'debit')::int,
+					-- credit = (_product->>'credit')::int,
+					-- name_id = (_product->>'name_id')::bigint,
+					-- quantity = (_product->>'quantity')::numeric,
+					-- unit_price = (_product->>'unit_price')::numeric,
+					-- import_id = (_product->>'import_id')::bigint,
 					
 					created = CASE
 	    			    WHEN _created_date IS NOT NULL

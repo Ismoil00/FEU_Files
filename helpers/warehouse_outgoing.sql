@@ -27,8 +27,8 @@ AS $BODY$
 		_storage_location_id bigint = (jdata->>'storage_location_id')::bigint;
 
 		_product jsonb;
-		newQuantity numeric;
-		leftQuantity numeric;
+		_quantity numeric;
+		_old_quantity numeric;
 		isUpdate boolean = false;
 		_updated jsonb = jsonb_build_object(
 			'user_id', (jdata->>'user_id')::uuid,
@@ -94,13 +94,21 @@ AS $BODY$
 		end if;
 
 		FOR _product IN SELECT * FROM json_array_elements(jdata->'products') LOOP
+			/* FETCHING VALUES FOR DRY */
+			_quantity = (_product->>'quantity')::numeric;
+			_name_id = (_product->>'name_id')::bigint;
+			_import_id = (_product->>'import_id')::bigint;
+			_unit_price = (_product->>'unit_price')::numeric;
+				
 			if (_product->>'id')::bigint is null then
 				/* PRODUCT AMOUNT CHECK VALIDATION */
 				perform accounting.warehouse_product_amount_validation(
-					(_product->>'name_id')::bigint,
-					(_product->>'import_id')::bigint,
-					(_product->>'quantity')::numeric,
-					(_product->>'unit_price')::numeric
+					_storage_location_id,
+					_name_id,
+					_import_id,
+					_quantity,
+					_unit_price,
+					_financing
 				);
 
 				/* CURR-TABLE INSERTION */
@@ -135,10 +143,10 @@ AS $BODY$
 					_comment,
 					_storage_location_id,
 
-					(_product->>'name_id')::bigint,
-					(_product->>'quantity')::numeric,
-					(_product->>'unit_price')::numeric,
-					(_product->>'import_id')::bigint,
+					_name_id,
+					_quantity,
+					_unit_price,
+					_import_id,
 					(_product->>'credit')::integer,
 					(_product->>'debit')::integer,
 					jsonb_build_object(
@@ -147,40 +155,24 @@ AS $BODY$
 					)
 				);
 			else
-				/* FETCH VALUES FOR DRY */
 				isUpdate = true;
-				newQuantity = (_product->>'quantity')::numeric;
-				_name_id = (_product->>'name_id')::bigint;
-				_import_id = (_product->>'import_id')::bigint;
-				_unit_price = (_product->>'unit_price')::numeric;
-				select newQuantity - o.quantity 
-				into leftQuantity
-				from accounting.warehouse_outgoing o
-				where id = (_product->>'id')::bigint;
+				/* we get old quantity */
+				select sum(quantity) into _old_quantity 
+				from accounting.warehouse_outgoing
+				where name_id = _name_id
+				and import_id = _import_id
+				and unit_price = _unit_price;
 
 				/* WE ONLY CHECK IF NEW QUANTITY IS ADDED */
-				if leftQuantity >= 0 then
+				if _old_quantity < _quantity then
 					perform accounting.warehouse_product_amount_validation(
+						_storage_location_id,
 						_name_id,
 						_import_id,
-						leftQuantity,
-						_unit_price
+						_quantity - _old_quantity,
+						_unit_price,
+						_financing
 					);
-				elseif leftQuantity < 0 then
-					/* RESET CLOSE FOR DECREASED PRODUCT IN BOTH TABLES */
-					update accounting.warehouse_incoming SET
-						closed = false,
-						updated = _updated
-					where name_id = _name_id 
-					and unique_import_number = _import_id
-					AND unit_price = _unit_price;
-						
-					update accounting.warehouse_outgoing SET
-						closed = false,
-						updated = _updated
-					where name_id = _name_id 
-					and import_id = _import_id
-					AND unit_price = _unit_price;
 				end if;
 
 				/* CURR-TABLE UPDATE */
@@ -202,11 +194,11 @@ AS $BODY$
     				END,
 					through = _through,
 					name_id = _name_id,
-					quantity = newQuantity,
+					quantity = _quantity,
 					unit_price = _unit_price,
+					import_id = _import_id,
 					credit = (_product->>'credit')::integer,
 					debit = (_product->>'debit')::integer,
-					import_id = _import_id,
 					storage_location_id = _storage_location_id,
 					updated = _updated
 				where id = (_product->>'id')::bigint;
