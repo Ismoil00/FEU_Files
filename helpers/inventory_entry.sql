@@ -1,19 +1,3 @@
-create table if not exists accounting.inventory_entry (
-	id bigserial primary key,
-	
-	storage_location_id bigint not null references commons.storage_location (id),
-	main_department_id integer not null references commons.department (id),
-	department_id integer references commons.department (id),
-	
-	comment text,
-	status commons.routing_status default 'pending',
-	financing accounting.budget_distribution_type not null,
-	
-	table_data jsonb not null,
-	created jsonb not null,
-	updated jsonb
-);
-
 
 select * from accounting.inventory_entry;
 
@@ -59,7 +43,7 @@ AS $BODY$
 		/* UPSERT */
 		if _id is null then
 			insert into accounting.inventory_entry (
-				-- storage_location_id,
+				storage_location_id,
 				main_department_id,
 				department_id,
 				comment,
@@ -67,7 +51,7 @@ AS $BODY$
 				table_data,
 				created
 			) values (
-				-- (jdata->>'storage_location_id')::bigint,
+				1,
 				(jdata->>'main_department_id')::integer,
 				(jdata->>'department_id')::integer,
 				(jdata->>'comment')::text,
@@ -571,7 +555,6 @@ BEGIN
             -- we update the warehouse incoming tables
             update accounting.warehouse_incoming wi set 
             	quantity = wi.quantity + _new_quantity,
-              	closed = case when _new_quantity = 0 then wi.closed else false end,
               	updated = _updated
             where unique_import_number = _import_id
             and name_id = _name_id
@@ -596,25 +579,28 @@ BEGIN
 			END IF;
 
             _quantity_diff = _new_quantity - (_old_row->>'quantity')::numeric;
-
 			if _quantity_diff < 0 then
+				-- Validate the quantity
 				perform accounting.warehouse_product_amount_validation(
+					1,
 					_name_id,
 					_import_id,
 					abs(_quantity_diff),
-					_unit_price
+					_price,
+					_financing
 				);
 			end if;
-              	
-			-- we update the warehouse incoming tables
-			update accounting.warehouse_incoming wi set 
-			  	quantity = wi.quantity + _quantity_diff,
-			  	closed = case when _quantity_diff <= 0 then wi.closed else false end,
-			  	updated = _updated
-			where unique_import_number = _import_id
-			and name_id = _name_id
-			and unit_price = _unit_price;
-  
+
+			if _quantity_diff <> 0 then
+				-- we update the warehouse incoming tables
+				update accounting.warehouse_incoming wi set 
+				  	quantity = wi.quantity + _quantity_diff,
+				  	updated = _updated
+				where unique_import_number = _import_id
+				and name_id = _name_id
+				and unit_price = _unit_price;
+			end if;
+			
 			-- minused = true + updated table_data
 			_updated_table_data = _updated_table_data || jsonb_build_array(
 				_row || jsonb_build_object('minused', true)

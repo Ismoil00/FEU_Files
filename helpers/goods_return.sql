@@ -1,25 +1,9 @@
-create table if not exists accounting.goods_return (
-	id bigserial primary key,
-	counterparty_id bigint not null references accounting.counterparty (id),
-	contract text not null,
-	
-	storage_location_id bigint not null references commons.storage_location (id),
-	main_department_id integer not null references commons.department (id),
-	
-	comment text,
-	status commons.routing_status default 'pending',
-	financing accounting.budget_distribution_type not null,
-	table_data jsonb not null,
-	created jsonb not null,
-	updated jsonb
-);
 
 
 select * from accounting.goods_return;
 
 
-CREATE OR REPLACE FUNCTION accounting.upsert_goods_return(
-	jdata json)
+CREATE OR REPLACE FUNCTION accounting.upsert_goods_return(jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
@@ -47,6 +31,7 @@ AS $BODY$
     	SELECT accounting.goods_return_table_data_validation(
     	  _user_id,
     	  (jdata->>'table_data')::jsonb,
+		  _financing,
     	  _id
     	) INTO _table_data;
 
@@ -65,7 +50,8 @@ AS $BODY$
 				(jdata->>'main_department_id')::integer,
 				(jdata->>'counterparty_id')::bigint,
 				(jdata->>'contract')::text,
-				(jdata->>'storage_location_id')::bigint,
+				1,
+				-- (jdata->>'storage_location_id')::bigint,
 				(jdata->>'comment')::text,
 				_financing,
 				_table_data,
@@ -79,7 +65,7 @@ AS $BODY$
 				main_department_id  = (jdata->>'main_department_id')::integer,
 				counterparty_id = (jdata->>'counterparty_id')::bigint,
 				contract = (jdata->>'contract')::text,
-				storage_location_id = (jdata->>'storage_location_id')::bigint,
+				-- storage_location_id = (jdata->>'storage_location_id')::bigint,
 				comment = (jdata->>'comment')::text,
 				financing = _financing,
 				table_data = _table_data,
@@ -153,7 +139,7 @@ AS $BODY$
 				main_department_id,
 				counterparty_id,
 				contract,
-				storage_location_id,
+				-- storage_location_id,
 				comment,
 				financing,
 				status,
@@ -221,7 +207,7 @@ AS $BODY$
 				'main_department_id', m.main_department_id,
 				'counterparty_id', m.counterparty_id,
 				'contract', m.contract,
-				'storage_location_id', m.storage_location_id,
+				-- 'storage_location_id', m.storage_location_id,
 				'comment', m.comment,
 				'financing', financing,
 				'status', status,
@@ -267,7 +253,7 @@ AS $BODY$
 				main_department_id,
 				counterparty_id,
 				contract,
-				storage_location_id,
+				-- storage_location_id,
 				comment,
 				financing,
 				status,
@@ -328,7 +314,7 @@ AS $BODY$
 			'main_department_id', m.main_department_id,
 			'counterparty_id', m.counterparty_id,
 			'contract', m.contract,
-			'storage_location_id', m.storage_location_id,
+			-- 'storage_location_id', m.storage_location_id,
 			'comment', m.comment,
 			'financing', financing,
 			'status', status,
@@ -387,9 +373,12 @@ select * from accounting.goods_return;
 
 select * from accounting.warehouse_incoming;
 
+
+
 create or replace function accounting.goods_return_table_data_validation(
 	_user_id text,
 	_table_data jsonb,
+	_financing accounting.budget_distribution_type,
 	row_id bigint default null::bigint
 )
 returns jsonb
@@ -430,17 +419,18 @@ BEGIN
 
         IF (_row->>'minused')::boolean is not true OR row_id IS NULL THEN
             -- Validate the quantity
-			PERFORM accounting.warehouse_product_amount_validation(
+			perform accounting.warehouse_product_amount_validation(
+				1,
 				_name_id,
 				_import_id,
 				_new_quantity,
-				_price
+				_price,
+				_financing
 			);
 
             -- we update the warehouse [incoming, outgoing] tables
             update accounting.warehouse_incoming wi set 
             	quantity = wi.quantity - _new_quantity,
-              	closed = case when wi.quantity - _new_quantity = 0 then true else false end,
               	updated = _updated
             where unique_import_number = _import_id
             and name_id = _name_id
@@ -467,17 +457,18 @@ BEGIN
             _quantity_diff = _new_quantity - (_old_row->>'quantity')::numeric;
 			IF _quantity_diff > 0 THEN
 				-- Validating the difference
-				PERFORM accounting.warehouse_product_amount_validation(
+				perform accounting.warehouse_product_amount_validation(
+					1,
 					_name_id,
 					_import_id,
 					_quantity_diff,
-					_price
+					_price,
+					_financing
 				);
   
               	-- we update the warehouse [incoming, outgoing] tables
               	update accounting.warehouse_incoming wi set 
               	  	quantity = wi.quantity - _quantity_diff,
-              	  	closed = case when wi.quantity - _quantity_diff = 0 then true else false end,
               	  	updated = _updated
               	where unique_import_number = _import_id
               	and name_id = _name_id
@@ -487,7 +478,6 @@ BEGIN
 				-- we update the warehouse [incoming, outgoing] tables
 				update accounting.warehouse_incoming wi set 
 				  	quantity = wi.quantity + abs(_quantity_diff),
-				  	closed = false,
 				  	updated = _updated
 				where unique_import_number = _import_id
 				and name_id = _name_id
