@@ -1,19 +1,79 @@
-create table if not exists accounting.manual_operations (
-	id bigserial primary key,
-	operation_number bigint not null,
-	debit integer not null,
-	credit integer not null,
-	amount numeric not null,
-	description text,
-	created jsonb not null,
-	updated jsonb
-);
+CREATE OR REPLACE FUNCTION accounting.get_manual_operations(
+	_financing accounting.budget_distribution_type,
+	_operation_number bigint DEFAULT NULL::bigint,
+	_date_from text DEFAULT NULL::text,
+	_date_to text DEFAULT NULL::text,
+	_user_id text DEFAULT NULL::text,
+	_limit integer DEFAULT 1000,
+	_offset integer DEFAULT 0)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE	
+		_result json;
+	BEGIN
+
+		with main as (
+			select
+				mo.operation_number,
+				us.fullname,
+				mo.created->>'user_id' user_id,
+				(mo.created->>'date')::date created_date,
+				mo.amount,
+				mo.financing,
+				jsonb_build_object(
+					'id', mo.id,
+					'debit', mo.debit,
+					'credit', mo.credit,
+					'amount', mo.amount,
+					'description', mo.description
+				) jsnb
+			from accounting.manual_operations mo
+			left join (
+				select 
+					a.id,
+					concat_ws(' ', s.lastname, s.firstname, s.middlename) fullname
+				from auth.user a
+				left join hr.staff s
+				on a.staff_id = s.id
+			) us on (mo.created->>'user_id')::uuid = us.id
+			where financing = _financing
+			and (_operation_number is null or _operation_number = mo.operation_number)
+			and (_date_from is null or _date_from::date <= (mo.created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (mo.created->>'date')::date)
+			and (_user_id is null or _user_id::uuid = us.id)
+			order by mo.operation_number
+			limit _limit offset _offset
+		),
+		grouped as (
+			select jsonb_build_object(
+				'financing', min(financing),
+				'operation_number', operation_number, 
+				'fullname', min(fullname), 
+				'user_id', min(user_id), 
+				'created_date', min(created_date),
+				'total_amount', sum(amount),
+				'entries', jsonb_agg(jsnb)
+			) aggregated from main
+			group by operation_number
+		) select jsonb_agg(g.aggregated) into _result from grouped g;
+
+		return _result;
+	end;
+$BODY$;
 
 
-select * from accounting.manual_operations;
+
+select * from accounting.manual_operations
 
 
-CREATE OR REPLACE FUNCTION accounting.upsert_manual_operations(jdata json)
+
+
+
+CREATE OR REPLACE FUNCTION accounting.upsert_manual_operations(
+	jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
@@ -21,17 +81,19 @@ CREATE OR REPLACE FUNCTION accounting.upsert_manual_operations(jdata json)
 AS $BODY$
 	DECLARE
 		_user_id uuid = (jdata->>'user_id')::uuid;
+		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
 		_operation_number bigint = (jdata->>'operation_number')::bigint;
 		_created_date date = (jdata->>'created_date')::date;
 		
-		_product jsonb;
+		_entry jsonb;
 		isUpdate boolean = false;
 	BEGIN
 
 		-- loop
-		FOR _product IN SELECT * FROM json_array_elements(jdata->'products') LOOP
-			if (_product->>'id')::bigint is null then
+		FOR _entry IN SELECT * FROM jsonb_array_elements((jdata->>'entries')::jsonb) LOOP
+			if (_entry->>'id')::bigint is null then
 				insert into accounting.manual_operations (
+					financing,
 					operation_number,
 					debit,
 					credit,
@@ -39,11 +101,12 @@ AS $BODY$
 					description,
 					created
 				) values (
+					_financing,
 					_operation_number,
-					(_product->>'debit')::integer,
-					(_product->>'credit')::integer,
-					(_product->>'amount')::numeric,
-					(_product->>'description')::text,
+					(_entry->>'debit')::integer,
+					(_entry->>'credit')::integer,
+					(_entry->>'amount')::numeric,
+					(_entry->>'description')::text,
 					jsonb_build_object(
 						'user_id', _user_id,
 						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
@@ -52,10 +115,11 @@ AS $BODY$
 			else
 				isUpdate = true;
 				update accounting.manual_operations mo SET
-					debit = (_product->>'debit')::integer,
-					credit = (_product->>'credit')::integer,
-					amount = (_product->>'amount')::numeric,
-					description = (_product->>'description')::text,
+					financing = _financing,
+					debit = (_entry->>'debit')::integer,
+					credit = (_entry->>'credit')::integer,
+					amount = (_entry->>'amount')::numeric,
+					description = (_entry->>'description')::text,
 					created = CASE
     				    WHEN _created_date IS NOT NULL
     				    THEN jsonb_set(
@@ -69,7 +133,7 @@ AS $BODY$
 						'user_id', _user_id,
 						'date', LOCALTIMESTAMP(0)
 					)
-				where id = (_product->>'id')::bigint;
+				where id = (_entry->>'id')::bigint;
 			end if;
     	END LOOP;
 
@@ -77,52 +141,5 @@ AS $BODY$
 			'msg', case when isUpdate then 'updated' else 'created' end,
 			'status', 200
 		);
-	end;
-$BODY$;
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.get_manual_operations(
-	_operation_number bigint default null,
-	_created_date text default null,
-	_user_id text default null,
-	_limit int default 100,
-	_offset int default 100
-)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE	
-		_result json;
-	BEGIN
-
-		select 
-			mo.operation_number,
-			us.fullname,
-			mo.created->>'user_id' user_id,
-			mo.created->>'date' date,
-
-			jsonb_build_object(
-				'id', mo.id,
-				'debit', mo.debit,
-				'credit', mo.credit,
-				'amount', mo.amount,
-				'description', mo.description
-			)
-		from accounting.manual_operationsc mo
-		left join (
-			select 
-				a.id,
-				concat_ws(' ', s.lastname, s.firstname, s.middlename) fullname
-			from auth.user a
-			left join hr.staff s
-			on a.staff_id = s.id
-		) us on (mo.created->>'user_id')::uuid = us.id
-		order by mo.operation_number;
-
-		return _result;
 	end;
 $BODY$;
