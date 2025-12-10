@@ -129,24 +129,16 @@ AS $BODY$
 					)
 				);
 			else
-				/* we get old quantity */
-				select sum(quantity) into _old_quantity 
-				from accounting.warehouse_incoming
-				where name_id = _name_id
-				and unique_import_number = _unique_import_number
-				and unit_price = _unit_price;
-	
-				if _old_quantity > _quantity then
-					perform accounting.warehouse_product_amount_validation_for_main_warehouse(
-					    1,
-					    _name_id,
-					    _unique_import_number,
-					    _old_quantity - _quantity,
-					    _unit_price,
-					    _financing,
-						_old_quantity
-					);
-				end if;
+				/* update validations */
+				perform accounting.warehouse_incoming_update_validation(
+					(_product->>'id')::bigint,
+				    1,
+				    _name_id,
+				    _unique_import_number,
+				    _quantity,
+				    _unit_price,
+				    _financing
+				);
 				
 				update accounting.warehouse_incoming wi SET
 					order_number = _order_number,
@@ -487,16 +479,26 @@ AS $BODY$
 $BODY$;
 
 
+select * from accounting.warehouse_incoming;
 
 
-CREATE OR REPLACE FUNCTION accounting.warehouse_product_amount_validation_for_main_warehouse(
+
+select * from accounting.warehouse_outgoing;
+
+
+select accounting.warehouse_incoming_update_validation(
+	675, 1, 267, 2, 20, 
+)
+
+
+CREATE OR REPLACE FUNCTION accounting.warehouse_incoming_update_validation(
+	_id bigint,
     _location_id bigint,
     _name_id bigint,
     _import_id bigint,
-    _amount numeric,
+    _quantity numeric,
     _unit_price numeric,
-    _financing accounting.budget_distribution_type,
-	old_quantity numeric
+    _financing accounting.budget_distribution_type
 )
 RETURNS void
 LANGUAGE plpgsql
@@ -504,144 +506,181 @@ AS $$
 DECLARE
     _left_quantity numeric;
     product_name text;
+	_old_name_id bigint;
+    _old_quantity numeric;
+    _amount numeric;
 BEGIN
 
-    -- 1. Main warehouse
-	with main_warehouse as (
-		SELECT 
-			name_id,
-			unique_import_number as import_id,
-			unit_price,
-			storage_location_id as to_storage_location_id,
-			null::bigint as from_storage_location_id,
-			sum(quantity) as quantity,
-			min((created->>'date')::date) as created_date,
-			min(credit) as credit
-		FROM accounting.warehouse_incoming
-		where name_id = _name_id
-		and unique_import_number = _import_id
-		and unit_price = _unit_price
-		and financing = _financing
-		-- and status = 'approved'
-		group by name_id, unique_import_number, unit_price, storage_location_id
-	),
-	-- 2. Movements history
-	movements as (
-		select
-			name_id,
-	        import_id,
-	        unit_price,
-			to_storage_location_id,
-			from_storage_location_id,
-			quantity,
-			moved_at::date as created_date,
-			credit
-		FROM accounting.product_transfer
-		where name_id = _name_id
-		and import_id = _import_id
-		and unit_price = _unit_price
-		and financing = _financing
-		-- and status = 'approved'
-	),
-	-- 3. All the warehouses
-	all_warehouses as (
-		select * from main_warehouse
-		UNION all
-		select * from movements
-	),
-	-- 4. Warehouses' incoming movements
-	movement_incoming AS (
-	    SELECT
-	        name_id,
-	        import_id,
-	        unit_price,
-	        to_storage_location_id AS location_id,
-	        SUM(quantity) AS quantity,
-			min(created_date) as created_date,
-			min(credit) as credit
-	    FROM all_warehouses
-	    GROUP BY name_id, import_id, unit_price, to_storage_location_id
-	),
-	-- 5. Warehouses' outgoing movements
-	movement_outgoing AS (
-	    SELECT
-	        name_id,
-	        import_id,
-	        unit_price,
-	        from_storage_location_id AS location_id,
-	        SUM(quantity) AS quantity
-	    FROM all_warehouses
-		WHERE from_storage_location_id IS NOT NULL
-	    GROUP BY name_id, import_id, unit_price, from_storage_location_id
-	),
-	-- 6. Real number calculation
-	movement_combined AS (
-	    SELECT
-	        COALESCE(mi.name_id, mo.name_id) AS name_id,
-	        COALESCE(mi.import_id, mo.import_id) AS import_id,
-	        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
-	        COALESCE(mi.location_id, mo.location_id) AS location_id,
-	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
-			mi.created_date,
-			mi.credit
-	    FROM movement_incoming mi
-	    FULL JOIN movement_outgoing mo
-	    ON mi.name_id = mo.name_id
-	    AND mi.import_id = mo.import_id
-	    AND mi.unit_price = mo.unit_price
-	    AND mi.location_id = mo.location_id
-		where COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) > 0
-	),
-	-- 7. Exports count
-	warehouse_exports as (
-		select 
-			name_id,
-			import_id,
-			unit_price,
-			storage_location_id as location_id,
-			sum(quantity) quantity
-		from accounting.warehouse_outgoing
-		where name_id = _name_id
-		and import_id = _import_id
-		and unit_price = _unit_price
-		and financing = _financing
-		-- and status = 'approved'
-		group by name_id, import_id, unit_price, storage_location_id
-	),
-	-- 8. We calculate final numbers
-	left_quantities as (
-		select 
-			COALESCE(mc.quantity, 0) - COALESCE(we.quantity, 0) left_quantity
-		from movement_combined mc
-		left join warehouse_exports we
-		ON mc.name_id = we.name_id
-	    AND mc.import_id = we.import_id
-	    AND mc.unit_price = we.unit_price
-	    AND mc.location_id = we.location_id
-		where mc.location_id = _location_id
-	)
-    SELECT left_quantity 
-	INTO _left_quantity 
-	FROM left_quantities;
+	/* product name for validation messages */
+	SELECT name->>'ru'
+	INTO product_name
+	FROM commons.nomenclature
+	WHERE id = _name_id;
 
-    IF _left_quantity IS NULL THEN
-        _left_quantity := 0;
-    END IF;
+	/* name_id change validation */
+	select name_id into _old_name_id
+	from accounting.warehouse_incoming
+	where id = _id;
+	if _name_id <> _old_name_id and 
+	(
+		exists (
+			select 1 from accounting.warehouse_outgoing
+			where name_id = _old_name_id
+			and unit_price = _unit_price
+			and import_id = _import_id
+		)
+		OR
+		exists (
+			select 1 from accounting.product_transfer
+			where name_id = _old_name_id
+			and unit_price = _unit_price
+			and import_id = _import_id
+		)
+	) then
+		RAISE EXCEPTION
+		'Вы не можете заменить этот товар на другой, поскольку он был экспортирован или перемещен.';
+	end if;
 
-
-    -- Actual validation
-    IF _left_quantity < _amount THEN
-
-        SELECT name->>'ru'
-        INTO product_name
-        FROM commons.nomenclature
-        WHERE id = _name_id;
-
-        RAISE EXCEPTION
-			'Вы не можете уменьшить на % количество, так как больше этого (около %) уже экспортировано или перемещено для товара "%"',
-            old_quantity - _amount, old_quantity - _left_quantity, product_name;
-    END IF;
-
+	/* we validate the new quantity */
+	select sum(quantity) into _old_quantity 
+	from accounting.warehouse_incoming
+	where name_id = _name_id
+	and unique_import_number = _import_id
+	and unit_price = _unit_price
+	and storage_location_id = _location_id;
+			
+	if _old_quantity > _quantity then
+	    -- 1. Main warehouse
+		with main_warehouse as (
+			SELECT 
+				name_id,
+				unique_import_number as import_id,
+				unit_price,
+				storage_location_id as to_storage_location_id,
+				null::bigint as from_storage_location_id,
+				sum(quantity) as quantity,
+				min((created->>'date')::date) as created_date,
+				min(credit) as credit
+			FROM accounting.warehouse_incoming
+			where name_id = _name_id
+			and unique_import_number = _import_id
+			and unit_price = _unit_price
+			and financing = _financing
+			-- and status = 'approved'
+			group by name_id, unique_import_number, unit_price, storage_location_id
+		),
+		-- 2. Movements history
+		movements as (
+			select
+				name_id,
+		        import_id,
+		        unit_price,
+				to_storage_location_id,
+				from_storage_location_id,
+				quantity,
+				moved_at::date as created_date,
+				credit
+			FROM accounting.product_transfer
+			where name_id = _name_id
+			and import_id = _import_id
+			and unit_price = _unit_price
+			and financing = _financing
+			-- and status = 'approved'
+		),
+		-- 3. All the warehouses
+		all_warehouses as (
+			select * from main_warehouse
+			UNION all
+			select * from movements
+		),
+		-- 4. Warehouses' incoming movements
+		movement_incoming AS (
+		    SELECT
+		        name_id,
+		        import_id,
+		        unit_price,
+		        to_storage_location_id AS location_id,
+		        SUM(quantity) AS quantity,
+				min(created_date) as created_date,
+				min(credit) as credit
+		    FROM all_warehouses
+		    GROUP BY name_id, import_id, unit_price, to_storage_location_id
+		),
+		-- 5. Warehouses' outgoing movements
+		movement_outgoing AS (
+		    SELECT
+		        name_id,
+		        import_id,
+		        unit_price,
+		        from_storage_location_id AS location_id,
+		        SUM(quantity) AS quantity
+		    FROM all_warehouses
+			WHERE from_storage_location_id IS NOT NULL
+		    GROUP BY name_id, import_id, unit_price, from_storage_location_id
+		),
+		-- 6. Real number calculation
+		movement_combined AS (
+		    SELECT
+		        COALESCE(mi.name_id, mo.name_id) AS name_id,
+		        COALESCE(mi.import_id, mo.import_id) AS import_id,
+		        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
+		        COALESCE(mi.location_id, mo.location_id) AS location_id,
+		        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
+				mi.created_date,
+				mi.credit
+		    FROM movement_incoming mi
+		    FULL JOIN movement_outgoing mo
+		    ON mi.name_id = mo.name_id
+		    AND mi.import_id = mo.import_id
+		    AND mi.unit_price = mo.unit_price
+		    AND mi.location_id = mo.location_id
+			where COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) > 0
+		),
+		-- 7. Exports count
+		warehouse_exports as (
+			select 
+				name_id,
+				import_id,
+				unit_price,
+				storage_location_id as location_id,
+				sum(quantity) quantity
+			from accounting.warehouse_outgoing
+			where name_id = _name_id
+			and import_id = _import_id
+			and unit_price = _unit_price
+			and financing = _financing
+			-- and status = 'approved'
+			group by name_id, import_id, unit_price, storage_location_id
+		),
+		-- 8. We calculate final numbers
+		left_quantities as (
+			select 
+				COALESCE(mc.quantity, 0) - COALESCE(we.quantity, 0) left_quantity
+			from movement_combined mc
+			left join warehouse_exports we
+			ON mc.name_id = we.name_id
+		    AND mc.import_id = we.import_id
+		    AND mc.unit_price = we.unit_price
+		    AND mc.location_id = we.location_id
+			where mc.location_id = _location_id
+		)
+	    SELECT left_quantity 
+		INTO _left_quantity 
+		FROM left_quantities;
+	
+	    IF _left_quantity IS NULL THEN
+	        _left_quantity := 0;
+	    END IF;
+	
+	
+	    -- Actual validation
+		_amount = _old_quantity - _quantity;
+	    IF _left_quantity < _amount THEN
+	        RAISE EXCEPTION
+				'Вы не можете уменьшить на % количество, так как больше этого (около %) уже экспортировано или перемещено для товара "%"',
+	            _old_quantity - _amount, _old_quantity - _left_quantity, product_name;
+	    END IF;
+	END IF;
 END;
 $$;
 

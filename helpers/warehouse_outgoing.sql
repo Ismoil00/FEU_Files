@@ -4,6 +4,47 @@ select * from accounting.warehouse_outgoing;
 select * from accounting.warehouse_total_routing;
 
 
+select accounting.upsert_warehouse_outgoing (
+	'
+	{
+		"routing": {
+			"warehouse_id":2,
+			"warehouse_section":"outgoing",
+			"jobposition_id":109,
+			"department_id":157,
+			"status":"approved",
+			"declined_text":""
+		},
+		"user_id": "98347360-c383-4979-9b21-c04d4808ce88",
+		"financing": "budget",
+		"products": [
+			{
+				"id":78,
+				"debit":111000,
+				"credit":54321,
+				"name_id":267,
+				"quantity":"15",
+				"import_id":1,
+				"unit_price":1000
+			}
+		],
+		"department_id": 1,
+		"storage_location_id": 3,
+		"staff_id": 3674,
+		"unique_outgoing_number": 2,
+		"order_number": 2,
+		"comment": "test3",
+		"created_date": "2025-12-10"
+	}
+	'
+);
+
+
+NOTICE:  _old_quantity 95.0
+NOTICE:  _quantity 15
+NOTICE:  difference -80.0
+NOTICE:  _storage_location_id 3
+
 
 CREATE OR REPLACE FUNCTION accounting.upsert_warehouse_outgoing(
 	jdata json)
@@ -161,7 +202,8 @@ AS $BODY$
 				from accounting.warehouse_outgoing
 				where name_id = _name_id
 				and import_id = _import_id
-				and unit_price = _unit_price;
+				and unit_price = _unit_price
+				and storage_location_id = _storage_location_id;
 
 				/* WE ONLY CHECK IF NEW QUANTITY IS ADDED */
 				if _old_quantity < _quantity then
