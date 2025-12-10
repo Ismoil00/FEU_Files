@@ -1,5 +1,4 @@
-CREATE OR REPLACE FUNCTION accounting.get_warehouse_state(
-	jdata jsonb)
+CREATE OR REPLACE FUNCTION accounting.get_warehouse_state(jdata jsonb)
     RETURNS jsonb
     LANGUAGE 'plpgsql'
     COST 100

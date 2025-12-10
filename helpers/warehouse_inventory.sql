@@ -13,28 +13,28 @@ DECLARE
     _offset int = COALESCE((jdata->>'offset')::int, 0);
     
     products bigint[] := CASE 
-        WHEN jdata->>'products' IS NULL OR jdata->'products' = 'null'::jsonb THEN NULL
+        WHEN jdata->>'products' IS NULL THEN NULL
         ELSE (
             SELECT array_agg(value::bigint)
-            FROM jsonb_array_elements_text(jdata->'products')
+            FROM jsonb_array_elements_text((jdata->>'products')::jsonb)
             WHERE value ~ '^\d+$'
         )
     END;
     
     categories int[] := CASE 
-        WHEN jdata->>'categories' IS NULL OR jdata->'categories' = 'null'::jsonb THEN NULL
+        WHEN jdata->>'categories' IS NULL THEN NULL
         ELSE (
             SELECT array_agg(value::int)
-            FROM jsonb_array_elements_text(jdata->'categories')
+            FROM jsonb_array_elements_text((jdata->>'categories')::jsonb)
             WHERE value ~ '^\d+$'
         )
     END;
     
     locations bigint[] := CASE 
-        WHEN jdata->>'locations' IS NULL OR jdata->'locations' = 'null'::jsonb THEN NULL
+        WHEN jdata->>'locations' IS NULL THEN NULL
         ELSE (
             SELECT array_agg(value::bigint)
-            FROM jsonb_array_elements_text(jdata->'locations')
+            FROM jsonb_array_elements_text((jdata->>'locations')::jsonb)
             WHERE value ~ '^\d+$'
         )
     END;
