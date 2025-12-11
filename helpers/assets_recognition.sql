@@ -25,6 +25,10 @@ create table if not exists accounting.assets_recognition (
 );
 
 
+select * from accounting.assets_recognition;
+
+
+select * from accounting.warehouse_total_routing
 
 
 CREATE OR REPLACE FUNCTION accounting.upsert_assets_recognition(
@@ -452,8 +456,7 @@ AS $BODY$
 			from routing_1		
 			group by warehouse_id
 		)
-		select jsonb_build_object(		
-			'key', m.key,
+		select jsonb_build_object(
 			'operation_number', m.operation_number,
 			'main_department_id', m.main_department_id,
 			'committee', m.committee,
