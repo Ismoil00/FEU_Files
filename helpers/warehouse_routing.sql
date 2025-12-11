@@ -110,6 +110,11 @@ begin
             SELECT 1 FROM accounting.product_transfer
             WHERE transfer_number = _warehouse_id AND status = 'approved'
         ) INTO is_approved;
+	ELSIF _warehouse_section = 'assets_recognition' THEN
+        SELECT EXISTS (
+            SELECT 1 FROM accounting.assets_recognition
+            WHERE operation_number = _warehouse_id AND status = 'approved'
+        ) INTO is_approved;
     END IF;
 
     IF is_approved THEN
@@ -242,6 +247,12 @@ begin
     	    SET status = 'approved',
     	        updated = _updated
     	    WHERE transfer_number = _warehouse_id;
+		
+		ELSIF _warehouse_section = 'assets_recognition' THEN
+    	    UPDATE accounting.assets_recognition
+    	    SET status = 'approved',
+    	        updated = _updated
+    	    WHERE operation_number = _warehouse_id;
     	END IF;
 	end if;
 	/*************************** FINAL APPROVAL ****************************/
@@ -350,6 +361,12 @@ begin
 	    SET status = 'pending',
 	        updated = _updated
 	    WHERE transfer_number = _warehouse_id;
+	
+	ELSIF _warehouse_section = 'assets_recognition' THEN
+	    UPDATE accounting.assets_recognition
+	    SET status = 'pending',
+	        updated = _updated
+	    WHERE operation_number = _warehouse_id;
 	END IF;
 
 	return json_build_object(
