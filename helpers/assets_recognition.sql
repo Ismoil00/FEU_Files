@@ -16,6 +16,7 @@ create table if not exists accounting.assets_recognition (
 	depreciation boolean default false,
 	depreciation_percent numeric CHECK (depreciation_percent >= 0 AND depreciation_percent <= 100),
 	depreciation_period integer CHECK (depreciation_period >= 0),
+	storage_location_id integer REFERENCES commons.storage_location (id),
 	/* table */
 	
 	committee jsonb,
@@ -28,7 +29,7 @@ create table if not exists accounting.assets_recognition (
 select * from accounting.assets_recognition;
 
 
-select * from accounting.warehouse_total_routing
+select * from accounting.warehouse_total_routing;
 
 
 CREATE OR REPLACE FUNCTION accounting.upsert_assets_recognition(
@@ -45,12 +46,18 @@ AS $BODY$
 			(jdata->>'financing')::accounting.budget_distribution_type;
 		_operation_number bigint = (jdata->>'operation_number')::bigint;
 		isUpdate bool = false;
-		
-		-- _storage_location_id bigint = (jdata->>'storage_location_id')::bigint;
 		_main_department_id int = (jdata->>'main_department_id')::int;
 		_comment text = (jdata->>'comment')::text;
 		_committee jsonb = (jdata->>'committee')::jsonb;
+
+		/* table */
 		_product jsonb;
+		_storage_location_id bigint;
+		_name_id bigint;
+		_import_id bigint;
+		_quantity numeric;
+		_unit_price numeric;
+		_old_quantity numeric;
 	BEGIN
 
 		/* VALIDATION START - STATUS CHECK */
@@ -77,15 +84,21 @@ AS $BODY$
 
 		/* UPSERT */
 		FOR _product IN SELECT * FROM jsonb_array_elements((jdata->>'table_data')::jsonb) LOOP
+			_storage_location_id = (_product->>'storage_location_id')::bigint;
+			_name_id = (_product->>'name_id')::bigint;
+			_import_id = (_product->>'import_id')::bigint;
+			_quantity = (_product->>'quantity')::numeric;
+			_unit_price = (_product->>'unit_price')::numeric;
+			
 			if (_product->>'id')::bigint is null then
-				-- perform accounting.warehouse_product_amount_validation(
-				--    _storage_location_id,
-				--    (_product->>'name_id')::bigint,
-				--    (_product->>'import_id')::bigint,
-				--    (_product->>'quantity')::numeric,
-				--    (_product->>'unit_price')::numeric,
-				--    _financing
-				-- );
+				perform accounting.warehouse_product_amount_validation_for_depreciation(
+					_storage_location_id,
+					_name_id,
+					_import_id,
+					_quantity,
+					_unit_price,
+					_financing
+				);
 			
 				insert into accounting.assets_recognition (
 					operation_number,
@@ -96,8 +109,9 @@ AS $BODY$
 					name_id,
 					quantity,
 					unit_price,
-					credit,
 					import_id,
+					storage_location_id,
+					credit,
 					inventory_number,
 					department_id,
 					staff_id,
@@ -115,11 +129,12 @@ AS $BODY$
 					_financing,
 
 					/* table */
-					(_product->>'name_id')::bigint,
-					(_product->>'quantity')::numeric,
-					(_product->>'unit_price')::numeric,
+					_name_id,
+					_quantity,
+					_unit_price,
+					_import_id,
+					_storage_location_id,
 					(_product->>'credit')::integer,
-					(_product->>'import_id')::bigint,
 					(_product->>'inventory_number')::text,
 					(_product->>'department_id')::integer,
 					(_product->>'staff_id')::bigint,
@@ -137,6 +152,21 @@ AS $BODY$
 				);
 			else
 				isUpdate = true;
+				/* if quantity is changed increasingly */
+				select quantity into _old_quantity
+				from accounting.assets_recognition
+				where id = (_product->>'id')::bigint;
+				if _quantity > _old_quantity then
+					perform accounting.warehouse_product_amount_validation_for_depreciation(
+						_storage_location_id,
+						_name_id,
+						_import_id,
+						_quantity - _old_quantity,
+						_unit_price,
+						_financing
+					);
+				end if;
+				
 				update accounting.assets_recognition ar SET				
 					-- storage_location_id = _storage_location_id,
 					main_department_id  = _main_department_id,
@@ -145,11 +175,12 @@ AS $BODY$
 					committee = _committee,
 					
 					/* table */
-					name_id = (_product->>'name_id')::bigint,
-					quantity = (_product->>'quantity')::numeric,
-					unit_price = (_product->>'unit_price')::numeric,
+					name_id = _name_id,
+					quantity = _quantity,
+					unit_price = _unit_price,
+					import_id = _import_id,
+					storage_location_id = _storage_location_id,
 					credit = (_product->>'credit')::integer,
-					import_id = (_product->>'import_id')::bigint,
 					inventory_number = (_product->>'inventory_number')::text,
 					department_id = (_product->>'department_id')::integer,
 					staff_id = (_product->>'staff_id')::bigint,
@@ -186,6 +217,377 @@ AS $BODY$
 		);
 	end;
 $BODY$;
+
+
+
+
+
+
+select accounting.warehouse_check_product_amount_for_depreciation (
+	66,
+	'budget'
+);
+
+select * FROM accounting.warehouse_incoming;
+
+
+CREATE OR REPLACE FUNCTION accounting.warehouse_check_product_amount_for_depreciation(
+	_name_id bigint,
+	_financing accounting.budget_distribution_type)
+    RETURNS jsonb
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+declare
+	_result jsonb;
+begin
+	-- 1. Main warehouse
+	with main_warehouse as (
+		SELECT 
+			name_id,
+			unique_import_number as import_id,
+			unit_price,
+			storage_location_id as to_storage_location_id,
+			null::bigint as from_storage_location_id,
+			sum(quantity) as quantity,
+			min((created->>'date')::date) as created_date,
+			min(credit) as credit
+		FROM accounting.warehouse_incoming
+		where name_id = _name_id
+		and financing = _financing
+		-- and status = 'approved'
+		group by name_id, unique_import_number, unit_price, storage_location_id
+	),
+	-- 2. Movements history
+	movements as (
+		select
+			name_id,
+	        import_id,
+	        unit_price,
+			to_storage_location_id,
+			from_storage_location_id,
+			quantity,
+			moved_at::date as created_date,
+			credit
+		FROM accounting.product_transfer
+		WHERE name_id = _name_id
+		and financing = _financing
+		-- and status = 'approved'
+	),
+	-- 3. All the warehouses
+	all_warehouses as (
+		select * from main_warehouse
+		UNION all
+		select * from movements
+	),
+	-- 4. Warehouses' incoming movements
+	movement_incoming AS (
+	    SELECT
+	        name_id,
+	        import_id,
+	        unit_price,
+	        to_storage_location_id AS location_id,
+	        SUM(quantity) AS quantity,
+			min(created_date) as created_date,
+			min(credit) as credit
+	    FROM all_warehouses
+	    GROUP BY name_id, import_id, unit_price, to_storage_location_id
+	),
+	-- 5. Warehouses' outgoing movements
+	movement_outgoing AS (
+	    SELECT
+	        name_id,
+	        import_id,
+	        unit_price,
+	        from_storage_location_id AS location_id,
+	        SUM(quantity) AS quantity
+	    FROM all_warehouses
+		WHERE from_storage_location_id IS NOT NULL
+	    GROUP BY name_id, import_id, unit_price, from_storage_location_id
+	),
+	-- 6. Real number calculation
+	movement_combined AS (
+	    SELECT
+	        COALESCE(mi.name_id, mo.name_id) AS name_id,
+	        COALESCE(mi.import_id, mo.import_id) AS import_id,
+	        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
+	        COALESCE(mi.location_id, mo.location_id) AS location_id,
+	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
+			mi.created_date,
+			mi.credit
+	    FROM movement_incoming mi
+	    FULL JOIN movement_outgoing mo
+	    ON mi.name_id = mo.name_id
+	    AND mi.import_id = mo.import_id
+	    AND mi.unit_price = mo.unit_price
+	    AND mi.location_id = mo.location_id
+		where COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) > 0
+	),
+	-- 7. Combined exports count (warehouse_outgoing + assets_recognition)
+	warehouse_exports as (
+		select 
+			name_id,
+			import_id,
+			unit_price,
+			storage_location_id as location_id,
+			sum(quantity) quantity
+		from accounting.warehouse_outgoing
+		where name_id = _name_id
+		and financing = _financing
+		-- and status = 'approved'
+		group by name_id, import_id, unit_price, storage_location_id
+		
+		UNION ALL
+		
+		select 
+			name_id,
+			import_id,
+			unit_price,
+			storage_location_id as location_id,
+			sum(quantity) quantity
+		from accounting.assets_recognition
+		where name_id = _name_id
+		and financing = _financing
+		-- and status = 'approved'
+		group by name_id, import_id, unit_price, storage_location_id
+	),
+	-- 8. Aggregate combined exports
+	warehouse_exports_aggregated as (
+		select 
+			name_id,
+			import_id,
+			unit_price,
+			location_id,
+			sum(quantity) quantity
+		from warehouse_exports
+		group by name_id, import_id, unit_price, location_id
+	),
+	-- 9. We calculate final numbers
+	left_quantities as (
+		select jsonb_build_object(
+		    'key', ROW_NUMBER() OVER (ORDER BY mc.location_id),
+		    'name_id', mc.name_id,
+		    'import_id', mc.import_id,
+		    'unit_price', mc.unit_price,
+		    'storage_location_id', mc.location_id,
+		    'left_quantity', COALESCE(mc.quantity, 0) - COALESCE(we.quantity, 0),
+		    'credit', mc.credit,
+		    'created_date', mc.created_date
+		) as aggregated 
+		from movement_combined mc
+		left join warehouse_exports_aggregated we
+		ON mc.name_id = we.name_id
+	    AND mc.import_id = we.import_id
+	    AND mc.unit_price = we.unit_price
+	    AND mc.location_id = we.location_id
+		where COALESCE(mc.quantity, 0) - COALESCE(we.quantity, 0) > 0
+		order by mc.location_id
+	)
+	select jsonb_agg(lq.aggregated) 
+	into _result
+	from left_quantities lq;
+	return json_build_object(
+		'status', 200,
+		'results', _result
+	);
+end;
+$BODY$;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+CREATE OR REPLACE FUNCTION accounting.warehouse_product_amount_validation_for_depreciation(
+	_location_id bigint,
+	_name_id bigint,
+	_import_id bigint,
+	_amount numeric,
+	_unit_price numeric,
+	_financing accounting.budget_distribution_type)
+    RETURNS void
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+    _left_quantity numeric;
+    product_name text;
+BEGIN
+    -- 1. Main warehouse
+	with main_warehouse as (
+		SELECT 
+			name_id,
+			unique_import_number as import_id,
+			unit_price,
+			storage_location_id as to_storage_location_id,
+			null::bigint as from_storage_location_id,
+			sum(quantity) as quantity,
+			min((created->>'date')::date) as created_date,
+			min(credit) as credit
+		FROM accounting.warehouse_incoming
+		where name_id = _name_id
+		and unique_import_number = _import_id
+		and unit_price = _unit_price
+		and financing = _financing
+		-- and status = 'approved'
+		group by name_id, unique_import_number, unit_price, storage_location_id
+	),
+	-- 2. Movements history
+	movements as (
+		select
+			name_id,
+	        import_id,
+	        unit_price,
+			to_storage_location_id,
+			from_storage_location_id,
+			quantity,
+			moved_at::date as created_date,
+			credit
+		FROM accounting.product_transfer
+		where name_id = _name_id
+		and import_id = _import_id
+		and unit_price = _unit_price
+		and financing = _financing
+		-- and status = 'approved'
+	),
+	-- 3. All the warehouses
+	all_warehouses as (
+		select * from main_warehouse
+		UNION all
+		select * from movements
+	),
+	-- 4. Warehouses' incoming movements
+	movement_incoming AS (
+	    SELECT
+	        name_id,
+	        import_id,
+	        unit_price,
+	        to_storage_location_id AS location_id,
+	        SUM(quantity) AS quantity,
+			min(created_date) as created_date,
+			min(credit) as credit
+	    FROM all_warehouses
+	    GROUP BY name_id, import_id, unit_price, to_storage_location_id
+	),
+	-- 5. Warehouses' outgoing movements
+	movement_outgoing AS (
+	    SELECT
+	        name_id,
+	        import_id,
+	        unit_price,
+	        from_storage_location_id AS location_id,
+	        SUM(quantity) AS quantity
+	    FROM all_warehouses
+		WHERE from_storage_location_id IS NOT NULL
+	    GROUP BY name_id, import_id, unit_price, from_storage_location_id
+	),
+	-- 6. Real number calculation
+	movement_combined AS (
+	    SELECT
+	        COALESCE(mi.name_id, mo.name_id) AS name_id,
+	        COALESCE(mi.import_id, mo.import_id) AS import_id,
+	        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
+	        COALESCE(mi.location_id, mo.location_id) AS location_id,
+	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
+			mi.created_date,
+			mi.credit
+	    FROM movement_incoming mi
+	    FULL JOIN movement_outgoing mo
+	    ON mi.name_id = mo.name_id
+	    AND mi.import_id = mo.import_id
+	    AND mi.unit_price = mo.unit_price
+	    AND mi.location_id = mo.location_id
+		where COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) > 0
+	),
+	-- 7. Combined exports count (warehouse_outgoing + assets_recognition)
+	warehouse_exports as (
+		select 
+			name_id,
+			import_id,
+			unit_price,
+			storage_location_id as location_id,
+			sum(quantity) quantity
+		from accounting.warehouse_outgoing
+		where name_id = _name_id
+		and import_id = _import_id
+		and unit_price = _unit_price
+		and financing = _financing
+		-- and status = 'approved'
+		group by name_id, import_id, unit_price, storage_location_id
+		
+		UNION ALL
+		
+		select 
+			name_id,
+			import_id,
+			unit_price,
+			storage_location_id as location_id,
+			sum(quantity) quantity
+		from accounting.assets_recognition
+		where name_id = _name_id
+		and import_id = _import_id
+		and unit_price = _unit_price
+		and financing = _financing
+		-- and status = 'approved'
+		group by name_id, import_id, unit_price, storage_location_id
+	),
+	-- 8. Aggregate combined exports
+	warehouse_exports_aggregated as (
+		select 
+			name_id,
+			import_id,
+			unit_price,
+			location_id,
+			sum(quantity) quantity
+		from warehouse_exports
+		group by name_id, import_id, unit_price, location_id
+	),
+	-- 9. We calculate final numbers for specific location
+	left_quantities as (
+		select 
+			COALESCE(mc.quantity, 0) - COALESCE(we.quantity, 0) left_quantity
+		from movement_combined mc
+		left join warehouse_exports_aggregated we
+		ON mc.name_id = we.name_id
+	    AND mc.import_id = we.import_id
+	    AND mc.unit_price = we.unit_price
+	    AND mc.location_id = we.location_id
+		where mc.location_id = _location_id
+	)
+    SELECT left_quantity 
+	INTO _left_quantity 
+	FROM left_quantities;
+	
+    IF _left_quantity IS NULL THEN
+        _left_quantity := 0;
+    END IF;
+	
+    -- Actual validation
+    IF _left_quantity < _amount THEN
+        SELECT name->>'ru'
+        INTO product_name
+        FROM commons.nomenclature
+        WHERE id = _name_id;
+		
+        RAISE EXCEPTION
+            'Запрошенное количество % превышает доступное % для товара "%"',
+            _amount, _left_quantity, product_name;
+    END IF;
+END;
+$BODY$;
+
+
+
 
 
 
@@ -255,7 +657,8 @@ AS $BODY$
 		                'staff_id', staff_id,
 		                'depreciation', depreciation,
 		                'depreciation_percent', depreciation_percent,
-		                'depreciation_period', depreciation_period
+		                'depreciation_period', depreciation_period,
+		                'storage_location_id', storage_location_id
 		            ) ORDER BY name_id
 		        ) AS table_data
 		    FROM accounting.assets_recognition
@@ -393,7 +796,8 @@ AS $BODY$
 		                'staff_id', staff_id,
 		                'depreciation', depreciation,
 		                'depreciation_percent', depreciation_percent,
-		                'depreciation_period', depreciation_period
+		                'depreciation_period', depreciation_period,
+						'storage_location_id', storage_location_id
 		            ) ORDER BY name_id
 		        ) AS table_data
 		    FROM accounting.assets_recognition
