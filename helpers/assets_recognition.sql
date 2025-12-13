@@ -20,6 +20,7 @@ create table if not exists accounting.assets_recognition (
 	/* table */
 	
 	committee jsonb,
+	committee_chairman bigint,
 	comment text,
 	created jsonb not null,
 	updated jsonb
@@ -49,6 +50,7 @@ AS $BODY$
 		_main_department_id int = (jdata->>'main_department_id')::int;
 		_comment text = (jdata->>'comment')::text;
 		_committee jsonb = (jdata->>'committee')::jsonb;
+		_committee_chairman bigint = (jdata->>'committee_chairman')::bigint;
 
 		/* table */
 		_product jsonb;
@@ -121,6 +123,7 @@ AS $BODY$
 					/* table */
 					
 					committee,
+					committee_chairman,
 					comment,
 					created
 				) values (
@@ -144,6 +147,7 @@ AS $BODY$
 					/* table */
 
 					_committee,
+					_committee_chairman,
 					_comment,
 					jsonb_build_object(
 						'user_id', _user_id,
@@ -173,6 +177,7 @@ AS $BODY$
 					financing = _financing,
 					comment = _comment,
 					committee = _committee,
+					committee_chairman = _committee_chairman,
 					
 					/* table */
 					name_id = _name_id,
@@ -629,6 +634,7 @@ AS $BODY$
 				main_department_id,
 				financing,
 				committee,
+				committee_chairman,
 				comment,
 				status,
 				(created->>'date')::date as created_date
@@ -728,6 +734,7 @@ AS $BODY$
 				'operation_number', m.operation_number,
 				'main_department_id', m.main_department_id,
 				'committee', m.committee,
+				'committee_chairman', m.committee_chairman,
 				'comment', m.comment,
 				'financing', financing,
 				'status', status,
@@ -773,6 +780,7 @@ AS $BODY$
 				main_department_id,
 				financing,
 				committee,
+				committee_chairman,
 				comment,
 				status,
 				(created->>'date')::date as created_date
@@ -864,6 +872,7 @@ AS $BODY$
 			'operation_number', m.operation_number,
 			'main_department_id', m.main_department_id,
 			'committee', m.committee,
+			'committee_chairman', m.committee_chairman,
 			'comment', m.comment,
 			'financing', financing,
 			'status', status,
