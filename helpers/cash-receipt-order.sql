@@ -17,9 +17,12 @@ create table if not exists accounting.cash_receipt_order
 
 
 
+
 CREATE OR REPLACE FUNCTION accounting.get_cash_receipt_order (
+	_financing accounting.budget_distribution_type,
 	_id bigint DEFAULT NULL::bigint,
-	_created_date text DEFAULT NULL::text,
+	_date_from text DEFAULT NULL::text,
+	_date_to text DEFAULT NULL::text,
 	_cash_flow_article_id bigint DEFAULT NULL::bigint,
 	_credit integer DEFAULT NULL::integer,
 	_limit integer DEFAULT 100,
@@ -35,7 +38,9 @@ AS $BODY$
 
 		with main as (
 			select jsonb_build_object(
+				'key', row_number() over(order by id),
 				'id', id,
+				'financing', financing,
 				'cash_flow_article_id', cash_flow_article_id,
 				'amount', amount,
 				'credit', credit,
@@ -47,8 +52,10 @@ AS $BODY$
 				'based_on', based_on
 			) aggregated
 			from accounting.cash_receipt_order
-			where (_id is null or id = _id)
-			and (_created_date is null or _created_date::date = (created->>'date')::date)
+			where financing = _financing 
+			and (_id is null or id = _id)
+			and (_date_from is null or _date_from::date <= (created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_cash_flow_article_id is null or _cash_flow_article_id = cash_flow_article_id)
 			and (_credit is null or _credit = credit)
 			order by id limit _limit offset _offset
@@ -74,11 +81,13 @@ AS $BODY$
 	DECLARE
 		_user_id text = jdata->>'user_id';
 		_created_date date = (jdata->>'created_date')::date;
-		_id bigint = (jdata->>'id')::bigint; 
+		_id bigint = (jdata->>'id')::bigint;
+		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
 	BEGIN
 
 		if _id is null then
 			insert into accounting.cash_receipt_order (
+				financing,
 				cash_flow_article_id,
 				amount,
 				credit,
@@ -90,6 +99,7 @@ AS $BODY$
 				
 				created
 			) values (
+				_financing,
 				(jdata->>'cash_flow_article_id')::bigint,
 				(jdata->>'amount')::numeric,
 				(jdata->>'credit')::integer,
@@ -106,6 +116,7 @@ AS $BODY$
 			) returning id into _id;
 		else
 			update accounting.cash_receipt_order cro SET
+				financing = _financing,
 				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
 				amount = (jdata->>'amount')::numeric,
 				credit = (jdata->>'credit')::integer,
@@ -139,7 +150,7 @@ AS $BODY$
 	end;
 $BODY$;
 
-
+select * from accounting.advance_report
 
 CREATE OR REPLACE FUNCTION accounting.get_cash_receipt_order_id(
 	)

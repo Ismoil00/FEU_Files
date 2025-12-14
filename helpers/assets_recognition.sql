@@ -228,6 +228,340 @@ $BODY$;
 
 
 
+
+
+ 
+
+CREATE OR REPLACE FUNCTION accounting.get_assets_recognition(
+	_department_id integer,
+	_financing accounting.budget_distribution_type,
+	_operation_number bigint DEFAULT NULL::bigint,
+	_created_from text DEFAULT NULL::text,
+	_created_to text DEFAULT NULL::text,
+	_accepted_department_id integer DEFAULT NULL::integer,
+	_limit integer DEFAULT 100,
+	_offset integer DEFAULT 0)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE	
+		_result json;
+		total int;
+	BEGIN
+
+		/* TOTAL */
+		select count(*) into total
+		from accounting.assets_recognition
+		where financing = _financing 
+		and (_operation_number is null or operation_number = _operation_number)
+		and (_created_from is null or _created_from::date <= (created->>'date')::date)
+		and (_created_to is null or _created_to::date >= (created->>'date')::date)
+		and (_accepted_department_id is null or _accepted_department_id = department_id);
+
+		/* MAIN QUERY */
+		WITH main1 AS (
+		    SELECT DISTINCT ON (operation_number)
+				operation_number,
+				main_department_id,
+				financing,
+				committee,
+				committee_chairman,
+				comment,
+				status,
+				(created->>'date')::date as created_date
+			from accounting.assets_recognition
+			where financing = _financing 
+			and (_operation_number is null or operation_number = _operation_number)
+			and (_created_from is null or _created_from::date <= (created->>'date')::date)
+			and (_created_to is null or _created_to::date >= (created->>'date')::date)
+			and (_accepted_department_id is null or _accepted_department_id = department_id)
+		    ORDER BY operation_number
+		), 
+		main2 AS (
+		    SELECT 
+		        operation_number,
+		        jsonb_agg(
+		            jsonb_build_object(
+		                'key', id,
+		                'id', id,
+		                'name_id', name_id,
+		                'quantity', quantity,
+		                'unit_price', unit_price,
+		                'import_id', import_id,
+		                'credit', credit,
+		                'inventory_number', inventory_number,
+		                'department_id', department_id,
+		                'staff_id', staff_id,
+		                'depreciation', depreciation,
+		                'depreciation_percent', depreciation_percent,
+		                'depreciation_period', depreciation_period,
+		                'storage_location_id', storage_location_id
+		            ) ORDER BY name_id
+		        ) AS table_data
+		    FROM accounting.assets_recognition
+		    GROUP BY operation_number
+		),
+		main as (
+			SELECT 
+				row_number() over(order by m1.operation_number) as key,
+			    m1.*,
+			    m2.table_data
+			FROM main1 m1
+			JOIN main2 m2 
+			USING (operation_number)
+			limit _limit offset _offset
+		),
+		routing_1 as (
+			select
+			wtr.warehouse_id,
+			row_number() over(
+				partition by wtr.warehouse_id
+				order by wtr.warehouse_id, wtr."createdAt"
+			) as rownumber,
+			jsonb_build_object(
+				'jobposition_id', wtr.jobposition_id,
+				'level', l.level,
+				'fullname', d.fullname,
+				'status', wtr.status,
+				'declined_text', wtr.declined_text,
+				'date', case when wtr."updatedAt" is not null
+					then (wtr."updatedAt")::date 
+					else (wtr."createdAt")::date end,
+				'time', case when wtr."updatedAt" is not null
+					then (wtr."updatedAt")::time 
+					else (wtr."createdAt")::time end
+			) routing_object from (
+				select * from accounting.warehouse_total_routing
+				where warehouse_section = 'assets_recognition' 
+			) wtr
+			left join (
+				select 
+			  		j.id, 
+					concat_ws(' ', s.lastname, s.firstname, s.middlename ) as fullname 
+				from hr.jobposition j
+			  	left join hr.staff s
+			  	on j.staff_id = s.id
+			) d on wtr.jobposition_id = d.id
+			left join (
+				select level, unnest(jobpositions) as jobposition_id 
+				from commons.department_routing_levels
+				where department_id = _department_id
+			) l on wtr.jobposition_id = l.jobposition_id
+			order by wtr.warehouse_id, wtr."createdAt"
+		), 
+		routing_2 as (
+			select
+				warehouse_id,
+				jsonb_object_agg(
+					rownumber,
+					routing_object
+				) as routing
+			from routing_1		
+			group by warehouse_id
+		)
+		select jsonb_agg(
+			jsonb_build_object(		
+				'key', m.key,
+				'operation_number', m.operation_number,
+				'main_department_id', m.main_department_id,
+				'committee', m.committee,
+				'committee_chairman', m.committee_chairman,
+				'comment', m.comment,
+				'financing', financing,
+				'status', status,
+				'created_date', m.created_date,				
+				'table_data', m.table_data,
+				'routing', r.routing
+			)
+		) into _result
+		from main m 
+		left join routing_2 r 
+		on m.operation_number = r.warehouse_id;
+
+		return jsonb_build_object(
+			'status', 200,
+			'total', total,
+			'results', _result
+		);
+	end;
+$BODY$;
+
+
+
+
+
+
+
+CREATE OR REPLACE FUNCTION accounting.get_assets_recognition_by_id(
+	_department_id integer,
+	_id bigint)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE	
+		_result json;
+	BEGIN
+	
+		/* MAIN QUERY */
+		WITH main1 AS (
+		    SELECT DISTINCT ON (operation_number)
+				operation_number,
+				main_department_id,
+				financing,
+				committee,
+				committee_chairman,
+				comment,
+				status,
+				(created->>'date')::date as created_date
+			from accounting.assets_recognition
+			where operation_number = _id 
+		), 
+		main2 AS (
+		    SELECT 
+		        operation_number,
+		        jsonb_agg(
+		            jsonb_build_object(
+						'key', id,
+		                'id', id,
+		                'name_id', name_id,
+		                'quantity', quantity,
+		                'unit_price', unit_price,
+		                'import_id', import_id,
+		                'credit', credit,
+		                'inventory_number', inventory_number,
+		                'department_id', department_id,
+		                'staff_id', staff_id,
+		                'depreciation', depreciation,
+		                'depreciation_percent', depreciation_percent,
+		                'depreciation_period', depreciation_period,
+						'storage_location_id', storage_location_id
+		            ) ORDER BY name_id
+		        ) AS table_data
+		    FROM accounting.assets_recognition
+			where operation_number = _id
+		    GROUP BY operation_number
+		),
+		main as (
+			SELECT 
+			    m1.*,
+			    m2.table_data
+			FROM main1 m1
+			JOIN main2 m2 
+			USING (operation_number)
+		),
+		routing_1 as (
+		select
+			wtr.warehouse_id,
+			row_number() over(
+				partition by wtr.warehouse_id
+				order by wtr.warehouse_id, wtr."createdAt"
+			) as rownumber,
+			jsonb_build_object(
+				'jobposition_id', wtr.jobposition_id,
+				'level', l.level,
+				'fullname', d.fullname,
+				'status', wtr.status,
+				'declined_text', wtr.declined_text,
+				'date', case when wtr."updatedAt" is not null
+					then (wtr."updatedAt")::date 
+					else (wtr."createdAt")::date end,
+				'time', case when wtr."updatedAt" is not null
+					then (wtr."updatedAt")::time 
+					else (wtr."createdAt")::time end
+			) routing_object from (
+				select * from accounting.warehouse_total_routing
+				where warehouse_section = 'assets_recognition' 
+			) wtr
+			left join (
+				select 
+			  		j.id, 
+					concat_ws(' ', s.lastname, s.firstname, s.middlename ) as fullname 
+				from hr.jobposition j
+			  	left join hr.staff s
+			  	on j.staff_id = s.id
+			) d on wtr.jobposition_id = d.id
+			left join (
+				select level, unnest(jobpositions) as jobposition_id 
+				from commons.department_routing_levels
+				where department_id = _department_id
+			) l on wtr.jobposition_id = l.jobposition_id
+			order by wtr.warehouse_id, wtr."createdAt"
+		), 
+		routing_2 as (
+			select
+				warehouse_id,
+				jsonb_object_agg(
+					rownumber,
+					routing_object
+				) as routing
+			from routing_1		
+			group by warehouse_id
+		)
+		select jsonb_build_object(
+			'operation_number', m.operation_number,
+			'main_department_id', m.main_department_id,
+			'committee', m.committee,
+			'committee_chairman', m.committee_chairman,
+			'comment', m.comment,
+			'financing', financing,
+			'status', status,
+			'created_date', m.created_date,				
+			'table_data', m.table_data,
+			'routing', r.routing
+		) into _result
+		from main m 
+		left join routing_2 r 
+		on m.operation_number = r.warehouse_id;
+
+		return jsonb_build_object(
+			'status', 200,
+			'result', _result
+		);
+	end;
+$BODY$;
+
+
+
+
+
+
+
+CREATE OR REPLACE FUNCTION accounting.get_assets_recognition_id()
+    RETURNS bigint
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE	
+		_last_id bigint;
+	BEGIN
+
+		select operation_number 
+		into _last_id
+		from accounting.assets_recognition
+		GROUP by operation_number
+		order by operation_number desc
+		limit 1;
+		
+		return _last_id;
+	end;
+$BODY$;
+
+
+
+
+
+
+
+
+
+
+
+
 select accounting.warehouse_check_product_amount_for_depreciation (
 	66,
 	'budget'
@@ -593,327 +927,3 @@ $BODY$;
 
 
 
-
-
-
-
- 
-
-CREATE OR REPLACE FUNCTION accounting.get_assets_recognition(
-	_department_id integer,
-	_financing accounting.budget_distribution_type,
-	_operation_number bigint DEFAULT NULL::bigint,
-	_created_from text DEFAULT NULL::text,
-	_created_to text DEFAULT NULL::text,
-	_accepted_department_id integer DEFAULT NULL::integer,
-	_limit integer DEFAULT 100,
-	_offset integer DEFAULT 0)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE	
-		_result json;
-		total int;
-	BEGIN
-
-		/* TOTAL */
-		select count(*) into total
-		from accounting.assets_recognition
-		where financing = _financing 
-		and (_operation_number is null or operation_number = _operation_number)
-		and (_created_from is null or _created_from::date <= (created->>'date')::date)
-		and (_created_to is null or _created_to::date >= (created->>'date')::date)
-		and (_accepted_department_id is null or _accepted_department_id = department_id);
-
-		/* MAIN QUERY */
-		WITH main1 AS (
-		    SELECT DISTINCT ON (operation_number)
-				operation_number,
-				main_department_id,
-				financing,
-				committee,
-				committee_chairman,
-				comment,
-				status,
-				(created->>'date')::date as created_date
-			from accounting.assets_recognition
-			where financing = _financing 
-			and (_operation_number is null or operation_number = _operation_number)
-			and (_created_from is null or _created_from::date <= (created->>'date')::date)
-			and (_created_to is null or _created_to::date >= (created->>'date')::date)
-			and (_accepted_department_id is null or _accepted_department_id = department_id)
-		    ORDER BY operation_number
-		), 
-		main2 AS (
-		    SELECT 
-		        operation_number,
-		        jsonb_agg(
-		            jsonb_build_object(
-		                'key', id,
-		                'id', id,
-		                'name_id', name_id,
-		                'quantity', quantity,
-		                'unit_price', unit_price,
-		                'import_id', import_id,
-		                'credit', credit,
-		                'inventory_number', inventory_number,
-		                'department_id', department_id,
-		                'staff_id', staff_id,
-		                'depreciation', depreciation,
-		                'depreciation_percent', depreciation_percent,
-		                'depreciation_period', depreciation_period,
-		                'storage_location_id', storage_location_id
-		            ) ORDER BY name_id
-		        ) AS table_data
-		    FROM accounting.assets_recognition
-		    GROUP BY operation_number
-		),
-		main as (
-			SELECT 
-				row_number() over(order by m1.operation_number) as key,
-			    m1.*,
-			    m2.table_data
-			FROM main1 m1
-			JOIN main2 m2 
-			USING (operation_number)
-			limit _limit offset _offset
-		),
-		routing_1 as (
-			select
-			wtr.warehouse_id,
-			row_number() over(
-				partition by wtr.warehouse_id
-				order by wtr.warehouse_id, wtr."createdAt"
-			) as rownumber,
-			jsonb_build_object(
-				'jobposition_id', wtr.jobposition_id,
-				'level', l.level,
-				'fullname', d.fullname,
-				'status', wtr.status,
-				'declined_text', wtr.declined_text,
-				'date', case when wtr."updatedAt" is not null
-					then (wtr."updatedAt")::date 
-					else (wtr."createdAt")::date end,
-				'time', case when wtr."updatedAt" is not null
-					then (wtr."updatedAt")::time 
-					else (wtr."createdAt")::time end
-			) routing_object from (
-				select * from accounting.warehouse_total_routing
-				where warehouse_section = 'assets_recognition' 
-			) wtr
-			left join (
-				select 
-			  		j.id, 
-					concat_ws(' ', s.lastname, s.firstname, s.middlename ) as fullname 
-				from hr.jobposition j
-			  	left join hr.staff s
-			  	on j.staff_id = s.id
-			) d on wtr.jobposition_id = d.id
-			left join (
-				select level, unnest(jobpositions) as jobposition_id 
-				from commons.department_routing_levels
-				where department_id = _department_id
-			) l on wtr.jobposition_id = l.jobposition_id
-			order by wtr.warehouse_id, wtr."createdAt"
-		), 
-		routing_2 as (
-			select
-				warehouse_id,
-				jsonb_object_agg(
-					rownumber,
-					routing_object
-				) as routing
-			from routing_1		
-			group by warehouse_id
-		)
-		select jsonb_agg(
-			jsonb_build_object(		
-				'key', m.key,
-				'operation_number', m.operation_number,
-				'main_department_id', m.main_department_id,
-				'committee', m.committee,
-				'committee_chairman', m.committee_chairman,
-				'comment', m.comment,
-				'financing', financing,
-				'status', status,
-				'created_date', m.created_date,				
-				'table_data', m.table_data,
-				'routing', r.routing
-			)
-		) into _result
-		from main m 
-		left join routing_2 r 
-		on m.operation_number = r.warehouse_id;
-
-		return jsonb_build_object(
-			'status', 200,
-			'total', total,
-			'results', _result
-		);
-	end;
-$BODY$;
-
-
-
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.get_assets_recognition_by_id(
-	_department_id integer,
-	_id bigint)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE	
-		_result json;
-	BEGIN
-	
-		/* MAIN QUERY */
-		WITH main1 AS (
-		    SELECT DISTINCT ON (operation_number)
-				operation_number,
-				main_department_id,
-				financing,
-				committee,
-				committee_chairman,
-				comment,
-				status,
-				(created->>'date')::date as created_date
-			from accounting.assets_recognition
-			where operation_number = _id 
-		), 
-		main2 AS (
-		    SELECT 
-		        operation_number,
-		        jsonb_agg(
-		            jsonb_build_object(
-						'key', id,
-		                'id', id,
-		                'name_id', name_id,
-		                'quantity', quantity,
-		                'unit_price', unit_price,
-		                'import_id', import_id,
-		                'credit', credit,
-		                'inventory_number', inventory_number,
-		                'department_id', department_id,
-		                'staff_id', staff_id,
-		                'depreciation', depreciation,
-		                'depreciation_percent', depreciation_percent,
-		                'depreciation_period', depreciation_period,
-						'storage_location_id', storage_location_id
-		            ) ORDER BY name_id
-		        ) AS table_data
-		    FROM accounting.assets_recognition
-			where operation_number = _id
-		    GROUP BY operation_number
-		),
-		main as (
-			SELECT 
-			    m1.*,
-			    m2.table_data
-			FROM main1 m1
-			JOIN main2 m2 
-			USING (operation_number)
-		),
-		routing_1 as (
-		select
-			wtr.warehouse_id,
-			row_number() over(
-				partition by wtr.warehouse_id
-				order by wtr.warehouse_id, wtr."createdAt"
-			) as rownumber,
-			jsonb_build_object(
-				'jobposition_id', wtr.jobposition_id,
-				'level', l.level,
-				'fullname', d.fullname,
-				'status', wtr.status,
-				'declined_text', wtr.declined_text,
-				'date', case when wtr."updatedAt" is not null
-					then (wtr."updatedAt")::date 
-					else (wtr."createdAt")::date end,
-				'time', case when wtr."updatedAt" is not null
-					then (wtr."updatedAt")::time 
-					else (wtr."createdAt")::time end
-			) routing_object from (
-				select * from accounting.warehouse_total_routing
-				where warehouse_section = 'assets_recognition' 
-			) wtr
-			left join (
-				select 
-			  		j.id, 
-					concat_ws(' ', s.lastname, s.firstname, s.middlename ) as fullname 
-				from hr.jobposition j
-			  	left join hr.staff s
-			  	on j.staff_id = s.id
-			) d on wtr.jobposition_id = d.id
-			left join (
-				select level, unnest(jobpositions) as jobposition_id 
-				from commons.department_routing_levels
-				where department_id = _department_id
-			) l on wtr.jobposition_id = l.jobposition_id
-			order by wtr.warehouse_id, wtr."createdAt"
-		), 
-		routing_2 as (
-			select
-				warehouse_id,
-				jsonb_object_agg(
-					rownumber,
-					routing_object
-				) as routing
-			from routing_1		
-			group by warehouse_id
-		)
-		select jsonb_build_object(
-			'operation_number', m.operation_number,
-			'main_department_id', m.main_department_id,
-			'committee', m.committee,
-			'committee_chairman', m.committee_chairman,
-			'comment', m.comment,
-			'financing', financing,
-			'status', status,
-			'created_date', m.created_date,				
-			'table_data', m.table_data,
-			'routing', r.routing
-		) into _result
-		from main m 
-		left join routing_2 r 
-		on m.operation_number = r.warehouse_id;
-
-		return jsonb_build_object(
-			'status', 200,
-			'result', _result
-		);
-	end;
-$BODY$;
-
-
-
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.get_assets_recognition_id()
-    RETURNS bigint
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE	
-		_last_id bigint;
-	BEGIN
-
-		select operation_number 
-		into _last_id
-		from accounting.assets_recognition
-		GROUP by operation_number
-		order by operation_number desc
-		limit 1;
-		
-		return _last_id;
-	end;
-$BODY$;

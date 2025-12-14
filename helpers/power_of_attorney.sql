@@ -12,14 +12,14 @@ create table if not exists accounting.attorney_power (
 );
 
 
-
 select * from accounting.attorney_power;
 
 
-
 CREATE OR REPLACE FUNCTION accounting.get_attorney_power(
+	_financing accounting.budget_distribution_type,
 	_id bigint DEFAULT NULL::bigint,
-	_created_date text DEFAULT NULL::text,
+	_date_from text DEFAULT NULL::text,
+	_date_to text DEFAULT NULL::text,
 	_staff_id bigint DEFAULT NULL::bigint,
 	_counterparty_id bigint DEFAULT NULL::bigint,
 	_limit integer DEFAULT 100,
@@ -35,7 +35,9 @@ AS $BODY$
 
 		with main as (
 			select jsonb_build_object(
+				'key', row_number() over(order by id),
 				'id', id,
+				'financing', financing,
 				'staff_id', staff_id,
 				'staff_passport_data', staff_passport_data,
 				'counterparty_id', counterparty_id,
@@ -46,8 +48,10 @@ AS $BODY$
 				'created_date', (created->>'date')::date
 			) aggregated
 			from accounting.attorney_power
-			where (_id is null or id = _id)
-			and (_created_date is null or _created_date::date = (created->>'date')::date)
+			where financing = _financing 
+			and (_id is null or id = _id)		
+			and (_date_from is null or _date_from::date <= (created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_staff_id is null or _staff_id = staff_id)
 			and (_counterparty_id is null or _counterparty_id = counterparty_id)
 			order by id limit _limit offset _offset
@@ -72,7 +76,8 @@ AS $BODY$
 	DECLARE
 		_user_id text = jdata->>'user_id';
 		_created_date date = (jdata->>'created_date')::date;
-		_id bigint = (jdata->>'id')::bigint; 
+		_id bigint = (jdata->>'id')::bigint;
+		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
 	BEGIN
 
 		if _id is null then
@@ -84,6 +89,7 @@ AS $BODY$
 				expire_date,
 				bank_account_id,
 				table_data,
+				financing,
 				created
 			) values (
 				(jdata->>'staff_id')::bigint,
@@ -93,6 +99,7 @@ AS $BODY$
 				(jdata->>'expire_date')::date,
 				(jdata->>'bank_account_id')::bigint,
 				(jdata->>'table_data')::jsonb,
+				_financing,
 				jsonb_build_object(
 					'user_id', _user_id,
 					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
@@ -107,6 +114,7 @@ AS $BODY$
 				expire_date = (jdata->>'expire_date')::date,
 				bank_account_id = (jdata->>'bank_account_id')::bigint,
 				table_data = (jdata->>'table_data')::jsonb,
+				financing = _financing,
 				created = CASE
     			    WHEN _created_date IS NOT NULL
     			    THEN jsonb_set(
