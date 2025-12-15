@@ -24,6 +24,7 @@ AS $BODY$
 		_user_id uuid = (jdata->>'user_id')::uuid;
 		_created_date date = (jdata->>'created_date')::date;
 		_id bigint = (jdata->>'id')::bigint;
+		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
 		isUpdate boolean = false;
 		
 		_staff_id bigint = (jdata->>'staff_id')::bigint;
@@ -35,6 +36,7 @@ AS $BODY$
 
 		if _id is null then
 			insert into accounting.advance_report (
+				financing,
 				staff_id,
 				purpose,
 				credit,
@@ -42,6 +44,7 @@ AS $BODY$
 				table_data,
 				created
 			) values (
+				_financing,
 				(jdata->>'staff_id')::bigint,
 				(jdata->>'purpose')::text,
 				(jdata->>'credit')::integer,
@@ -55,6 +58,7 @@ AS $BODY$
 		else
 			isUpdate = true;
 			update accounting.advance_report ar SET
+				financing = _financing,
 				staff_id = (jdata->>'staff_id')::bigint,
 				purpose = (jdata->>'purpose')::text,
 				credit = case when jdata->>'credit' is not null 
@@ -88,9 +92,13 @@ $BODY$;
 select accounting.get_advance_report();
 
 
+
+
 CREATE OR REPLACE FUNCTION accounting.get_advance_report(
+	_financing accounting.budget_distribution_type,
 	_id bigint DEFAULT NULL::bigint,
-	_created_date text DEFAULT NULL::text,
+	_date_from text DEFAULT NULL::text,
+	_date_to text DEFAULT NULL::text,
 	_staff_id bigint DEFAULT NULL::bigint,
 	_credit bigint DEFAULT NULL::bigint,
 	_limit integer DEFAULT 1000,
@@ -107,7 +115,9 @@ AS $BODY$
 
 		with main as (
 			select jsonb_build_object(
+				'key', row_number() over(order by id),
 				'id', id,
+				'financing', financing,
 				'staff_id', staff_id,
 				'purpose', purpose,
 				'credit', credit,
@@ -116,8 +126,10 @@ AS $BODY$
 				'created_date', (created->>'date')::date
 			) aggregated
 			from accounting.advance_report
-			where (_id is null or id = _id)
-			and (_created_date is null or _created_date::date = (created->>'date')::date)
+			where financing = _financing 
+			and (_id is null or id = _id)
+			and (_date_from is null or _date_from::date <= (created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_staff_id is null or _staff_id = staff_id)
 			and (_credit is null or _credit = credit)
 			order by id limit _limit offset _offset

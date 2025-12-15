@@ -15,13 +15,19 @@ create table if not exists accounting.payment_order_outgoing
 	updated jsonb
 );
 
+select * from accounting.payment_order_outgoing
 
-CREATE OR REPLACE FUNCTION accounting.get_payment_order_outgoing (
+
+
+CREATE OR REPLACE FUNCTION accounting.get_payment_order_outgoing(
+	_financing accounting.budget_distribution_type,
 	_id bigint DEFAULT NULL::bigint,
-	_created_date text DEFAULT NULL::text,
+	_date_from text DEFAULT NULL::text,
+	_date_to text DEFAULT NULL::text,
 	_payment_date text DEFAULT NULL::text,
 	_bank_account_id bigint DEFAULT NULL::bigint,
 	_counterparty_id bigint DEFAULT NULL::bigint,
+	_staff_id bigint DEFAULT NULL::bigint,
 	_limit integer DEFAULT 100,
 	_offset integer DEFAULT 0)
     RETURNS json
@@ -35,24 +41,33 @@ AS $BODY$
 
 		with main as (
 			select jsonb_build_object(
+				'key', row_number() over(order by id),
 				'id', id,
+				'financing', financing,
 				'bank_account_id', bank_account_id,
-				'counterparty_id', counterparty_id,
 				'cash_flow_article_id', cash_flow_article_id,
 				'amount', amount,
 				'debit', debit,
 				'advance_account_debit', advance_account_debit,
 				'description', description,
-				'counterparty_contract', counterparty_contract,
 				'created_date', (created->>'date')::date,
-				'payment_date', payment_date
+				'payment_date', payment_date,
+				
+				'given_to', given_to,
+				'staff_id', staff_id,
+				'staff_id_document', staff_id_document,
+				'counterparty_id', counterparty_id,
+				'counterparty_contract', counterparty_contract
 			) aggregated
 			from accounting.payment_order_outgoing
-			where (_id is null or id = _id)
-			and (_created_date is null or _created_date::date = (created->>'date')::date)
+			where financing = _financing 
+			and (_id is null or id = _id)
+			and (_date_from is null or _date_from::date <= (created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_payment_date is null or _payment_date::date = payment_date)
 			and (_bank_account_id is null or _bank_account_id = bank_account_id)
 			and (_counterparty_id is null or _counterparty_id = counterparty_id)
+			and (_staff_id is null or _staff_id = staff_id)
 			order by id limit _limit offset _offset
 		) select jsonb_agg(m.aggregated) into _result from main m;
 
@@ -76,31 +91,44 @@ AS $BODY$
 	DECLARE
 		_user_id text = jdata->>'user_id';
 		_created_date date = (jdata->>'created_date')::date;
-		_id bigint = (jdata->>'id')::bigint; 
+		_id bigint = (jdata->>'id')::bigint;
+		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
 	BEGIN
 
 		if _id is null then
 			insert into accounting.payment_order_outgoing (
+				financing,
 				bank_account_id,
-				counterparty_id,
-				counterparty_contract,
 				cash_flow_article_id,
 				amount,
 				debit,
 				advance_account_debit,
 				description,
 				payment_date,
+
+				given_to,
+				staff_id,
+				staff_id_document,
+				counterparty_id,
+				counterparty_contract,
+				
 				created
 			) values (
+				_financing,
 				(jdata->>'bank_account_id')::bigint,
-				(jdata->>'counterparty_id')::bigint,
-				(jdata->>'counterparty_contract')::text,
 				(jdata->>'cash_flow_article_id')::bigint,
 				(jdata->>'amount')::numeric,
 				(jdata->>'debit')::integer,
 				(jdata->>'advance_account_debit')::integer,
 				(jdata->>'description')::text,
 				(jdata->>'payment_date')::date,
+
+				(jdata->>'given_to')::text,
+				(jdata->>'staff_id')::bigint,
+				(jdata->>'staff_id_document')::text,
+				(jdata->>'counterparty_id')::bigint,
+				(jdata->>'counterparty_contract')::text,
+				
 				jsonb_build_object(
 					'user_id', _user_id,
 					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
@@ -108,15 +136,21 @@ AS $BODY$
 			) returning id into _id;
 		else
 			update accounting.payment_order_outgoing poo SET
+				financing = _financing,
 				bank_account_id = (jdata->>'bank_account_id')::bigint,
-				counterparty_id = (jdata->>'counterparty_id')::bigint,
-				counterparty_contract = (jdata->>'counterparty_contract')::text,
 				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
 				amount = (jdata->>'amount')::numeric,
 				debit = (jdata->>'debit')::integer,
 				advance_account_debit = (jdata->>'advance_account_debit')::integer,
 				description = (jdata->>'description')::text,
 				payment_date = (jdata->>'payment_date')::date,
+
+				given_to = (jdata->>'given_to')::text,
+				staff_id = (jdata->>'staff_id')::bigint,
+				staff_id_document = (jdata->>'staff_id_document')::text,
+				counterparty_id = (jdata->>'counterparty_id')::bigint,
+				counterparty_contract = (jdata->>'counterparty_contract')::text,
+				
 				created = CASE
     			    WHEN _created_date IS NOT NULL
     			    THEN jsonb_set(
