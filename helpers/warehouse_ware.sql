@@ -148,8 +148,8 @@ BEGIN
         INTO _total_available
         FROM warehouse_availability;
 
-		raise notice '_total_available %', _total_available;
-		raise notice '____________________________________';
+		-- raise notice '_total_available %', _total_available;
+		-- raise notice '____________________________________';
 
         -- If no quantity available in any warehouse, mark as exported
         IF _total_available IS NULL OR _total_available <= 0 THEN
@@ -250,6 +250,7 @@ BEGIN
 	),
 	filtered_with_depreciation AS (
 		SELECT 
+			row_number() over(order by issued_date) as key,
 			id,
 			name_id,
 			issued_date,
@@ -285,6 +286,7 @@ BEGIN
 	),
 	filtered AS (
 		SELECT jsonb_build_object(
+			'key', key,
 			'id', id,
 			'name_id', name_id,
 			'issued_date', issued_date,

@@ -79,6 +79,7 @@ BEGIN
         'results', COALESCE(
             jsonb_agg(
                 jsonb_build_object(
+                    'key', key,
                     'id', id,
                     'name_id', name_id,
                     'department_id', department_id,
