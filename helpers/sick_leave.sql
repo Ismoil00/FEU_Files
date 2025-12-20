@@ -215,6 +215,56 @@ AS $BODY$
 $BODY$;
 
 
+
+
+
+
+-- =====================================================
+-- 3. GET/SEARCH FUNCTION BY ID
+-- =====================================================
+CREATE OR REPLACE FUNCTION accounting.get_sick_leave_by_id(_id bigint)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+    DECLARE
+        _result json;
+    BEGIN
+
+        -- Get paginated results
+        WITH main AS (
+            SELECT jsonb_build_object(
+                'id', id,
+                'paid_month', paid_month,
+                'date_from', date_from,
+                'date_to', date_to,
+                'department_id', department_id,
+                'staff_id', staff_id,
+                'sick_leave_type', sick_leave_type,
+                'days', days,
+                'percent', percent,
+                'comment', comment,
+                'daily_average_earning', daily_average_earning,
+                'total_benefit_amount', total_benefit_amount,
+				'salary_record', salary_record,
+                'created_date', (created->>'date')::date
+            ) AS aggregated
+            FROM accounting.sick_leave
+            WHERE id = _id
+        )
+        SELECT jsonb_build_object('result', m.aggregated)::json
+        INTO _result
+        FROM main m;
+
+        RETURN _result;
+    END;
+$BODY$;
+
+
+
+
+
 -- =====================================================
 -- 4. GET LAST ID FUNCTION
 -- =====================================================
