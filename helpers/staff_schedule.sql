@@ -16,47 +16,128 @@ select hr.get_schedules(
 );
 
 
+select * from hr.staff_schedule
+where month_closed is true
 
-select * from hr.staff_schedule_comments;
+update hr.staff_schedule set
+	month_closed = false
+where month_closed is true
 
 
-select * from hr.staff_schedule;
 
-
-CREATE OR REPLACE FUNCTION hr.get_schedules(json_data json)
+CREATE OR REPLACE FUNCTION hr.get_schedules(jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
 DECLARE
-	year_v int = (json_data->>'year')::int;
-	month_v int = (json_data->>'month')::int;
-	staffs_v json = (json_data->>'staffs')::json;
+	_year int = (jdata->>'year')::integer;
+	_month int = (jdata->>'month')::integer;
+	_staffs jsonb = (jdata->>'staffs')::jsonb;
 	_result json;
 BEGIN
-	
-	with staff_schedule as (
+
+	with m1 as (
 		select
-			ss.staff_id id,
+			staff_id,
+			month_closed,
 			json_object_agg(
-				ss.date, 
-				ss.marker_id
-			) data
+				date,
+				marker_id
+			) date_and_marker
 		from hr.staff_schedule ss
-		where extract(year from ss.date) = year_v
-		and extract(month from ss.date) = month_v
-		and ss.staff_id in (
-			SELECT json_array_elements_text(staffs_v)::bigint
+		where extract(year from ss.date) = _year
+		and extract(month from ss.date) = _month
+		and staff_id in (
+			SELECT jsonb_array_elements_text(_staffs)::bigint
 		)
-		group by ss.staff_id
-	) select json_object_agg(id, data)
-	from staff_schedule into _result;
+		group by staff_id, month_closed
+	),
+	m2 as (
+		select
+			month_closed,
+			json_object_agg(
+				staff_id,
+				date_and_marker
+			) paginated
+		from m1 group by month_closed
+	)
+	select jsonb_build_object(
+		'year', _year, 
+		'month', _month,
+		'closed', m2.month_closed,
+		'staffs', m2.paginated
+	) into _result from m2;
 	 
-	return json_build_object(
-		'year', year_v, 
-		'month', month_v, 
-		'staffs', _result
+	return _result;
+END;
+$BODY$;
+
+
+
+select * from hr.staff_schedule;
+
+
+
+CREATE OR REPLACE FUNCTION hr.upsert_schedules (jdata json)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+	_year int = (jdata->>'year')::int;
+	_month int = (jdata->>'month')::int;
+	_user_id uuid = (jdata->>'user_id')::uuid;
+	staffs jsonb = (jdata->>'staffs')::jsonb;
+	
+	_staff jsonb;
+	_created jsonb = jsonb_build_object (
+		'date', localtimestamp(0),
+		'user_id', _user_id
+	);
+BEGIN
+
+	-- || checking if the month is closed ||
+	if exists (
+		SELECT 1 FROM hr.staff_schedule
+		WHERE EXTRACT(YEAR FROM date) = _year
+		  AND EXTRACT(MONTH FROM date) = _month
+		  AND staff_id IN (
+		    SELECT (key::bigint) FROM jsonb_each(staffs) AS e(key, value)
+		 )
+		 group by month_closed
+		 having month_closed is true
+	)
+		then 
+			RAISE EXCEPTION 'Месяц закрыт и не подлежит изменению' USING ERRCODE = 'P0001';
+	end if;
+
+	/* UPSERT */
+	FOR _staff IN SELECT * FROM jsonb_array_elements((jdata->>'staffs')::jsonb) LOOP
+		INSERT INTO hr.staff_schedule (
+		    staff_id, 
+		   	date,
+		    marker_id,
+			day_type_id,
+		    created
+		) VALUES (
+		    (_staff->>'staff_id')::bigint,
+		    (_staff->>'date')::date,
+		    (_staff->>'marker_id')::bigint,
+		    (_staff->>'day_type_id')::bigint,
+			_created
+		)
+		ON CONFLICT (staff_id, date)
+		DO UPDATE SET
+		    marker_id = EXCLUDED.marker_id,
+		    updated = _created;
+	end loop;
+	
+	return jsonb_build_object(
+		'status', 200,
+		'msg', 'updated'
 	);
 END;
 $BODY$;
@@ -70,119 +151,37 @@ $BODY$;
 
 
 
-
-
-
-
-CREATE OR REPLACE FUNCTION hr.upsert_schedules (json_data json)
+CREATE OR REPLACE FUNCTION hr.close_month(jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
 DECLARE
-	year_v int = (json_data->>'year')::int;
-	month_v int = (json_data->>'month')::int;
-	staffs json = (json_data->>'staffs')::json;
-	logs jsonb = (json_data->>'log')::jsonb;
-	staffs_ids json;
-	staff_id_v bigint;
-	date_v date;
-	marker_id_v bigint;
-BEGIN
-
-	-- || checking if the month is closed ||
-	if exists (
-		SELECT 1 FROM hr.staff_schedule
-		WHERE EXTRACT(YEAR FROM date) = year_v
-		  AND EXTRACT(MONTH FROM date) = month_v
-		  AND staff_id IN (
-		    SELECT (key::bigint)
-		    FROM json_each(staffs) AS e(key, value)
-		 )
-		 group by month_closed
-		 having month_closed = true
-	)
-		then 
-			-- return '{"status": 400, "msg": 9"}'::json;
-			RAISE EXCEPTION '9' USING ERRCODE = 'P0001';
-	end if;
-
-	-- || we create/update each staff data ||:
-	FOR staff_id_v IN SELECT json_object_keys(staffs) LOOP
-		
-		FOR date_v IN SELECT json_object_keys(staffs->staff_id_v::text) LOOP
-			marker_id_v := staffs->staff_id_v::text->date_v::text;
-			
-            INSERT INTO hr.staff_schedule (
-                staff_id, 
-               	date, 
-                marker_id, 
-                created
-            ) VALUES (
-                staff_id_v,
-                date_v,
-                marker_id_v,
-                (logs || jsonb_build_object('date', localtimestamp(0)))
-            )
-            ON CONFLICT (staff_id, date)
-            DO UPDATE SET
-                marker_id = EXCLUDED.marker_id,
-                updated = (logs || jsonb_build_object('date', localtimestamp(0)));
-			
-		end loop;
-	end loop;
-	
-	return '{"status": 200, "msg": 1}'::json;
-END;
-$BODY$;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-CREATE OR REPLACE FUNCTION hr.close_month(json_data json)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-DECLARE
-	year_v int;
-	month_v int;
-	staffs_v json;
+	_year int;
+	_month int;
+	_staffs json;
 	logs jsonb;
-	month_closed_v boolean;
+	month_is_closed boolean;
 BEGIN
-    year_v := json_data->>'year';
-    month_v := json_data->>'month';
-	staffs_v := json_data->>'staffs';
-	logs := (json_data->'log')::jsonb;
+    _year := jdata->>'year';
+    _month := jdata->>'month';
+	_staffs := jdata->>'staffs';
+	logs := (jdata->'log')::jsonb;
 
 	-- || checking if the month is closed ||
-	SELECT month_closed into month_closed_v
+	SELECT month_closed into month_is_closed
 	FROM hr.staff_schedule
-	WHERE EXTRACT(YEAR FROM date) = year_v
-	  AND EXTRACT(MONTH FROM date) = month_v
+	WHERE EXTRACT(YEAR FROM date) = _year
+	  AND EXTRACT(MONTH FROM date) = _month
 	  AND staff_id IN (
-		SELECT json_array_elements_text(staffs_v)::bigint
+		SELECT json_array_elements_text(_staffs)::bigint
 	)
 	group by month_closed
-	having month_closed = true;
+	having month_closed is true;
 	
-	if month_closed_v then 
-		RAISE EXCEPTION '10' USING ERRCODE = 'P0001';
+	if month_is_closed then 
+		RAISE EXCEPTION 'Отчётный месяц уже закрыт и не подлежит изменению' USING ERRCODE = 'P0001';
 	end if;
 	-- || -------------------------------- ||
 
@@ -190,94 +189,19 @@ BEGIN
 	update hr.staff_schedule ss set 
 		month_closed = true,
 		updated = (logs || jsonb_build_object('date', CURRENT_TIMESTAMP))
-	where extract(year from ss.date) = year_v
-	and extract(month from ss.date) = month_v
+	where extract(year from ss.date) = _year
+	and extract(month from ss.date) = _month
 	and staff_id in (
-		SELECT json_array_elements_text(staffs_v)::bigint
+		SELECT json_array_elements_text(_staffs)::bigint
 	);
 	-- || --------------------------------- ||
 	
-	return '{"status": 200, "msg": 11}'::json;
+	return jsonb_build_object(
+		'status', 200,
+		'msg', 'success'
+	);
 END;
 $BODY$;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-select commons.get_current_month (
-	4, 2025
-)
-
-CREATE OR REPLACE FUNCTION commons.get_current_month(
-	month_param integer DEFAULT NULL::integer,
-	year_param integer DEFAULT NULL::integer)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-DECLARE 
-    cur_month json;
-BEGIN
-    
-	IF month_param IS NULL AND year_param IS NULL THEN
-		select json_array(
-			select generate_series(
-    	       (date (date_trunc('month', now())::date))::timestamp,
-    	       (date ((date_trunc('month', now()) + interval '1 month - 1 day')::date))::timestamp,
-    	       interval '1 day'
-    	     )::date
-		) into cur_month;
-		
-		RETURN json_build_object('current_date', current_date, 'whole_month', cur_month);
-	ELSE
-		IF month_param IS NULL OR year_param IS NULL THEN
-		    RAISE EXCEPTION 'Both month and year parameters must be provided if any one is provided.' USING ERRCODE = 'P0001';
-
-        END IF;
-        
-        IF month_param < 1 OR month_param > 12 THEN
-			RAISE EXCEPTION 'Invalid month value. Month should be between 1 and 12.' USING ERRCODE = 'P0001';
-        END IF;
-
-  		cur_month := (
-            SELECT json_agg(d::date)
-            FROM generate_series(
-                make_date(year_param, month_param, 1),
-                CASE
-                    WHEN month_param = 12 
-                        THEN make_date(year_param + 1, 1, 1) - interval '1 day'
-                    ELSE 
-                        make_date(year_param, month_param + 1, 1) - interval '1 day'
-                END,
-                interval '1 day'
-            ) d
-        );
-		
-		RETURN json_build_object(
-			case when month_param = extract(month from current_date) 
-			and year_param = extract(year from current_date)
-			then 'current_date' else 'first_date' end,
-			case when month_param = extract(month from current_date)
-			and year_param = extract(year from current_date)
-			then current_date else make_date(year_param, month_param, 1) end,
-			'whole_month', cur_month
-		);
-	END IF;
-END;
-$BODY$;
-
 
 
 
