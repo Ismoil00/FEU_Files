@@ -8,6 +8,10 @@
 
 SELECT * FROM hr.trip_type;
 
+SELECT * FROM commons.local_trip_prices;
+
+
+select * from commons.trip_daily_pay;
 
 
 CREATE OR REPLACE FUNCTION hr.upsert_business_trip(
