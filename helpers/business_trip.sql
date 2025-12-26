@@ -10,239 +10,164 @@ SELECT * FROM hr.trip_type;
 
 SELECT * FROM commons.local_trip_prices;
 
-
 select * from commons.trip_daily_pay;
 
+select * from  hr.business_trip;
 
-CREATE OR REPLACE FUNCTION hr.upsert_business_trip(
-	jdata json)
+
+select hr.upsert_business_trip(
+	'
+		{
+			"user_id": "b325f38d-f247-462e-adf1-40bce7806302",
+			"destination": 10,
+			"abroad_trip": true,
+			"created_date": "2025-12-26",
+			"table_rows": [
+				{
+					"personnel_number": "E-44444445555",
+					"department_id": 1,
+					"staff_id": 3667,
+					"date_from": "2025-12-10",
+					"date_to": "2025-12-31",
+					"purpose": "",
+					"fare": "",
+					"house_rent": 1119153.2
+				}
+			]
+		}
+	'
+);
+
+
+CREATE OR REPLACE FUNCTION hr.upsert_business_trip(jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
 DECLARE
-	_id bigint := (jdata->>'id')::bigint; 
-	_isLocal boolean := (jdata->>'isLocal')::boolean;
-	_travel_to_id bigint := (jdata->>'travel_to_id')::bigint;
-	_fare bigint := CASE WHEN (jdata->>'isLocal')::boolean THEN (
-			SELECT fare 
-			FROM commons.local_trip_prices
-			WHERE table_id = (jdata->>'travel_to_id')::bigint)
-		ELSE COALESCE((jdata->>'fare')::bigint, 0) END;
-	_trip_type_id bigint;
-	_start_date date := (jdata->>'start_date')::date;
-	_end_date date := (jdata->>'end_date')::date;
-	_daily_payment bigint = case when (jdata->>'isLocal')::boolean then (
-			select amount
-			from commons.trip_daily_pay
-			where record_id = 1 and
-			end_date is null
-		) else round((
-			select amount
-			from commons.trip_daily_pay
-			where record_id = 2 and
-			end_date is null
-		) * (
-			select value from commons.usd_exchange
-		)) end;
-	_house_rent bigint = case when (jdata->>'isLocal')::boolean then (
-			select amount
-			from commons.trip_daily_pay
-			where record_id = 3 and
-			end_date is null
-		) else COALESCE((jdata->>'house_rent')::bigint, 0) end;
-	_payment bigint;
-	_days int = ((jdata->>'end_date')::date - (jdata->>'start_date')::date)::int;
+	_operation_number bigint = (jdata->>'operation_number')::bigint;
+	_abroad_trip boolean = (jdata->>'abroad_trip')::boolean;
+	_destination bigint = (jdata->>'destination')::bigint;
+	_visiting_organization text = (jdata->>'visiting_organization')::text;
+	_description text = (jdata->>'description')::text;
+	_doc_id bigint = (jdata->>'doc_id')::bigint;
+	_user_id text = jdata->>'user_id';
+	_created_date date = (jdata->>'created_date')::date;
+	
+	_staff jsonb;
+	_date_from date;
+	_date_to date;
+	_id bigint;
+	isUpdate boolean = false;
 BEGIN
 
--- 	raise notice 'fare %', _fare;
--- 	raise notice 'house rent %', _house_rent;
-	
-	-- we check the OVERLAPS:
-	if exists (
-		select 1 from hr.business_trip
-		where _id is null 
-		and department_id = (jdata->>'department_id')::int
-		and jobtitle_id = (jdata->>'jobtitle_id')::bigint
-		and (
-			(start_date <= _start_date and end_date >= _start_date) or
-			(start_date <= _end_date and end_date >= _end_date) or 
-			(start_date >= _start_date and end_date <= _end_date)
-		)                  
-	) THEN
-		-- return json_build_object('status', 409, 'msg', 8);
-		RAISE EXCEPTION '8' USING ERRCODE = 'P0001';
-
+	/* GENERATING NEW OPERATION-NUMBER INSERTION */
+	if _operation_number is null then
+		SELECT coalesce(max(sub.operation_number), 0) + 1
+		into _operation_number from (
+			SELECT operation_number
+	    	FROM hr.business_trip
+	    	GROUP BY operation_number
+	    	ORDER BY operation_number DESC
+	    	LIMIT 1
+		) sub;
 	end if;
 
-   	if _id is null then
-		-- first we insert data to trip type table:
-		insert into hr.trip_type (
-			isLocal, 
-			local_travel,
-			foreign_travel,
-			fare,
-			house_rent,
-			daily_payment,
-			return_ticket,
-			otherside_pay,
-			created_at
-		) values (
-			_isLocal,
-			case when _isLocal then _travel_to_id else null end,
-			case when _isLocal then null else _travel_to_id end,
-			_fare,
-			_house_rent,
-			_daily_payment,
-			(jdata->>'return_ticket')::boolean,
-			(jdata->>'otherside_pay')::boolean,
-			(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::timestamp(0)
-		) RETURNING id into _trip_type_id;
+	FOR _staff IN SELECT * FROM jsonb_array_elements((jdata->>'table_rows')::jsonb) LOOP
+		_date_from = (_staff->>'date_from')::date;
+		_date_to = (_staff->>'date_to')::date;
+		_id = (_staff->>'id')::bigint;
+		
+	   	if _id is null then
+		   	insert into hr.business_trip (
+				operation_number,
+				abroad_trip,
+				destination,
+				visiting_organization,
+				description,
+				doc_id,
+				
+				personnel_number,
+				department_id,
+				staff_id,
+				date_from,
+				date_to,
+				purpose,
+				fare,
+				house_rent,
+				
+				created
+		   	) values (
+			   	_operation_number,
+				_abroad_trip,
+				_destination,
+				_visiting_organization,
+				_description,
+				_doc_id,
 
-		-- then we calculate the payment amount:
-		_payment = hr.calculate_business_trip_payment(
-			(jdata->>'staff_id')::bigint,
-			_isLocal,
-			_fare,
-			_house_rent,
-			_daily_payment,
-			(jdata->>'return_ticket')::boolean,
-			(jdata->>'otherside_pay')::boolean,
-			_days
-		);
+				(_staff->>'personnel_number')::text,
+				(_staff->>'department_id')::integer,
+				(_staff->>'staff_id')::bigint,
+				_date_from,
+				_date_to,
+				(_staff->>'purpose')::text,
+				(_staff->>'fare')::numeric,
+				(_staff->>'house_rent')::numeric,
 
-		-- then we insert data to business trip table:
-		insert into hr.business_trip (
-			staff_id,
-			department_id,
-			jobtitle_id,
-			trip_type_id,
-			doc_id,
-			payment,
-			start_date,
-			end_date,
-			created
-		) values (
-			(jdata->>'staff_id')::bigint,
-			(jdata->>'department_id')::int,
-			(jdata->>'jobtitle_id')::bigint,
-			_trip_type_id,
-			(jdata->>'doc_id')::bigint,
-			_payment,
-			_start_date,
-			_end_date,
-			jsonb_build_object(
-				'user_id', (jdata->>'user_id')::uuid,
-				'date', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::timestamp(0)
-			)	
-		);
-			
-		return json_build_object('status', 200, 'msg', 1);
-	else
-		-- first we get the trip type table id:
-		select trip_type_id into _trip_type_id from hr.business_trip where id = _id;
+				jsonb_build_object(
+					'user_id', _user_id,
+					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
+				)
+		   	);
+		else
+			isUpdate = true;
 
-		-- first we update trip type table:
-		update hr.trip_type SET
-			isLocal = _isLocal, 
-			local_travel = case when _isLocal then _travel_to_id else null end,
-			foreign_travel = case when _isLocal then null else _travel_to_id end,
-			fare = _fare,
-			house_rent = _house_rent,
-			daily_payment = _daily_payment,
-			return_ticket = (jdata->>'return_ticket')::boolean,
-			otherside_pay = (jdata->>'otherside_pay')::boolean,
-			updated_at = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::timestamp(0)
-		where id = _trip_type_id;
+			update hr.business_trip bt SET
+				operation_number = _operation_number,
+				abroad_trip = _abroad_trip,
+				destination = _destination,
+				visiting_organization = _visiting_organization,
+				description = _description,
+				doc_id = _doc_id,
+				
+				personnel_number = (_staff->>'personnel_number')::text,
+				department_id = (_staff->>'department_id')::integer,
+				staff_id = (_staff->>'staff_id')::bigint,
+				date_from = _date_from,
+				date_to = _date_to,
+				purpose = (_staff->>'purpose')::text,
+				fare = (_staff->>'fare')::numeric,
+				house_rent = (_staff->>'house_rent')::numeric,
 
-		-- then we calculate the payment amount:
-		_payment = hr.calculate_business_trip_payment(
-			(jdata->>'staff_id')::bigint,
-			_isLocal,
-			_fare,
-			_house_rent,
-			_daily_payment,
-			(jdata->>'return_ticket')::boolean,
-			(jdata->>'otherside_pay')::boolean,
-			_days
-		);
+				created = CASE
+				    WHEN _created_date IS NOT NULL THEN 
+						jsonb_set(
+				             bt.created,
+				             '{date}',
+				             to_jsonb(_created_date)
+				         )
+				-- 		-- jsonb_build_object(
+				-- 		--     'date', _created_date::timestamp,
+				-- 		-- 	'user_id', bt.created->>'user_id'
+				-- 		-- )
+				    ELSE bt.created
+				END,
+				updated = jsonb_build_object(
+					'date', LOCALTIMESTAMP(0),
+					'user_id', _user_id
+				)
+			where id = _id;
+		end if;
+	END LOOP;
 
-		-- then we update the business trip table:
-		update hr.business_trip SET
-			department_id = (jdata->>'department_id')::int,
-			jobtitle_id = (jdata->>'jobtitle_id')::bigint,
-			doc_id = (jdata->>'doc_id')::bigint,
-			payment = _payment,
-			start_date = _start_date,
-			end_date = _end_date,
-			updated = jsonb_build_object(
-				'user_id', (jdata->>'user_id')::uuid,
-				'date', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::timestamp(0)
-			)
-		where id = _id;
-			
-		return json_build_object('status', 200, 'msg', 2);
-	end if;
-	
+	return json_build_object(
+		'msg', case when isUpdate then 'updated' else 'created' end,
+		'operation_number', _operation_number,
+		'status', 200
+	);
 END;
 $BODY$;
-
-
-
-
-
-
-
-
-
-
-
-
-/*
-	CALCULATION
-*/
-CREATE OR REPLACE FUNCTION hr.calculate_business_trip_payment(
-	_staff_id bigint,
-	islocal boolean,
-	fare bigint,
-	house_rent bigint,
-	_daily_payment bigint,
-	_return_ticket boolean,
-	_otherside_pays boolean,
-	days integer)
-    RETURNS bigint
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-DECLARE
-	salary bigint = (payments.calculate_salary(_staff_id, days)->>'salary')::bigint;
-	daily_payment bigint = coalesce(_daily_payment, 0);
-	return_ticket int = case when _return_ticket then 2 else 1 end;
-	otherside_pays int = case when _otherside_pays then 0 else 1 end;
-	payment bigint;
-BEGIN
-	-- we calculate the payment:
-	if isLocal THEN
-		payment = salary + fare * return_ticket + (daily_payment + house_rent) * days;
-	ELSE
-		payment = salary + (fare + (daily_payment + house_rent) * days) * otherside_pays;		
-	end if;
-
-	-- raise notice 'fare %', fare;
-	-- raise notice 'salary %', salary;
-	-- raise notice 'daily paymant amount %', daily_payment;
-	-- raise notice 'return_tickett %', return_ticket;
-	-- raise notice 'otherside_pays %', otherside_pays;
-	-- raise notice 'payment %', payment;
-
-	return payment;
-END;
-$BODY$;
-
-
-
 
 
 
@@ -253,90 +178,132 @@ $BODY$;
 /*
 	STAFF BUSINESS TRIP
 */
-CREATE OR REPLACE FUNCTION hr.get_staff_business_trip(
-	_id bigint)
+
+
+select hr.get_business_trip (
+	false,
+	null,
+	null,
+	null,
+	null
+);
+
+select * from  hr.business_trip;
+
+CREATE OR REPLACE FUNCTION hr.get_business_trip(
+	_abroad_trip boolean,
+	_destination bigint default null,
+	_visiting_organization text default null,
+	_date_from text default null,
+	_date_to text default null,
+	_limit integer default 100,
+	_offset integer default 0
+)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
 DECLARE
-	rec record;
 	_result json;
 BEGIN
 
-	-- check the record existance:
-	if not exists (select 1 from hr.business_trip where id = _id) then
-		return null::json;
-	end if;
-
-	WITH bt AS (
-	    SELECT id, staff_id, trip_type_id, start_date, end_date
+	WITH bt_parent AS (
+	    SELECT DISTINCT ON (operation_number)
+	        operation_number,
+	        doc_id,
+	        abroad_trip,
+	        destination,
+	        visiting_organization,
+	        description,
+	        (created->>'date')::date AS created_date
 	    FROM hr.business_trip
-	    WHERE id = _id
+	    WHERE abroad_trip = _abroad_trip
+		and (_destination is null or _destination = destination)
+		and (_visiting_organization is null or _visiting_organization = visiting_organization)
+		and (_date_from is null or _date_from::date <= date_from)
+		and (_date_to is null or _date_to::date >= date_to)
+	    ORDER BY operation_number, id
+	), bt_table_rows AS (
+	    SELECT 
+	        operation_number,
+	        jsonb_agg(
+	            jsonb_build_object(
+					'key', rn,
+	                'id', id,
+	                'staff_id', staff_id,
+	                'department_id', department_id,
+	                'date_from', date_from,
+	                'date_to', date_to,
+	                'personnel_number', personnel_number,
+	                'purpose', purpose,
+	                'fare', fare,
+	                'house_rent', house_rent
+	            ) ORDER BY id desc
+	        ) AS table_rows
+	    FROM (
+			select
+				*,
+				row_number() OVER (
+	                PARTITION BY operation_number
+	                ORDER BY id DESC
+	            ) AS rn
+			from hr.business_trip
+			WHERE abroad_trip = _abroad_trip
+			and (_destination is null or _destination = destination)
+			and (_visiting_organization is null or _visiting_organization = visiting_organization)
+			and (_date_from is null or _date_from::date <= date_from)
+			and (_date_to is null or _date_to::date >= date_to)
+		)
+	    GROUP BY operation_number
 	),
-	s AS (
-	    SELECT id, firstname, lastname, middlename FROM hr.staff
+	joined as (
+		SELECT *
+		FROM bt_parent
+		JOIN bt_table_rows 
+		USING (operation_number)
 	),
-	tt as (
-		select 
-			id, isLocal, 
-			local_travel, 
-			foreign_travel, 
-			fare, daily_payment, 
-			house_rent,
-			return_ticket
-		from hr.trip_type
+	total_count as (
+		select count(*) as total from joined
 	),
-	lt as (
-		select table_id, intercity 
-		from commons.local_trip_prices
-		where end_date is null
-	),
-	ft as (
-		select id, country
-		from commons.countries
+	bt as (
+		SELECT jsonb_build_object(
+			'key', row_number() OVER (order by created_date desc),
+			'operation_number', operation_number,
+	        'doc_id', doc_id,
+	        'abroad_trip', abroad_trip,
+	        'destination', destination,
+	        'visiting_organization', visiting_organization,
+	        'description', description,
+	        'created_date', created_date,
+			'table_rows', table_rows
+		) as paginated
+		FROM joined
+		order by created_date desc
+		limit _limit offset _offset
 	)
-	SELECT
-		bt.id, 
-		bt.staff_id, 
-		format('%s %s %s', s.firstname, s.lastname, s.middlename) as fullname,
-		case when tt.isLocal then lt.intercity else ft.country end as travels_to,
-		bt.end_date - bt.start_date as days,
-		case when tt.return_ticket then tt.fare/100*2 else tt.fare/100 end as fare,
-		tt.daily_payment/100*((bt.end_date - bt.start_date)::int) as daily_payment,
-		tt.house_rent/100*((bt.end_date - bt.start_date)::int) as house_rent,
-		(tt.house_rent/100 + tt.daily_payment/100)*((bt.end_date - bt.start_date)::int) + (
-			case when tt.return_ticket then tt.fare/100*2 else tt.fare/100 end
-		) as total,
-		bt.start_date,
-		bt.end_date
-	INTO rec
-	FROM bt
-	JOIN s ON bt.staff_id = s.id
-	JOIN tt ON bt.trip_type_id = tt.id
-	LEFT JOIN lt ON tt.local_travel = lt.table_id
-	LEFT JOIN ft ON tt.foreign_travel = ft.id;
+	select jsonb_build_object(
+		'status', 200,
+		'results', jsonb_agg(bt.paginated),
+		'total', (select total from total_count)
+	) into _result from bt;
 
-	return row_to_json(rec);
+	return _result;
 END
 $BODY$;
 
 
 
 
-
-
-
-
-
+select hr.get_business_trip_by_operation_number(1)
 
 /*
-	DEPARTMENT BUSINESS TRIP
+	STAFF BUSINESS TRIP BY OPERATION NUMBER
 */
-CREATE OR REPLACE FUNCTION hr.get_department_business_trip (
-	_department_id integer,
-	_year integer)
+
+CREATE OR REPLACE FUNCTION hr.get_business_trip_by_operation_number(
+	_operation_number bigint
+)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
@@ -345,110 +312,97 @@ AS $BODY$
 DECLARE
 	_result json;
 BEGIN
-	select json_agg(
-	json_build_object(
-		'id', bt.id,
-		'staff_id', bt.staff_id,
-		'firstname', s.firstname,
-		'lastname', s.lastname,
-		'middlename', s.middlename,
-		'department_id', bt.department_id,
-		'jobtitle_id', bt.jobtitle_id,
-		'doc_id', bt.doc_id,
-		'isLocal', tt.isLocal,
-		'travel_to', case when tt.isLocal then ltp.intercity else con.country end,
-		'travel_to_id', case when tt.isLocal then tt.local_travel else tt.foreign_travel end,
-		'payment', bt.payment ,
-		'daily_payment', tt.daily_payment,
-		'fare', tt.fare,
-		'house_rent', tt.house_rent,
-		'return_ticket', tt.return_ticket,
-		'otherside_pay', tt.otherside_pay,
-		'start_date', bt.start_date,
-		'end_date', bt.end_date
-	)) into _result
-	from (
-		select 
-			id, staff_id, 
-			department_id,
-			doc_id,
-			jobtitle_id, 
-			trip_type_id,
-			payment,
-			start_date,
-			end_date
-		from hr.business_trip
-		where department_id = _department_id
-		and (
-			extract(year from start_date) = _year
-			or
-			extract(year from end_date) = _year
+
+	WITH bt_parent AS (
+	    SELECT DISTINCT ON (operation_number)
+	        operation_number,
+	        doc_id,
+	        abroad_trip,
+	        destination,
+	        visiting_organization,
+	        description,
+	        (created->>'date')::date AS created_date
+	    FROM hr.business_trip
+	    WHERE operation_number = _operation_number
+	    ORDER BY operation_number, id
+	), bt_table_rows AS (
+	    SELECT 
+	        operation_number,
+	        jsonb_agg(
+	            jsonb_build_object(
+					'key', rn,
+	                'id', id,
+	                'staff_id', staff_id,
+	                'department_id', department_id,
+	                'date_from', date_from,
+	                'date_to', date_to,
+	                'personnel_number', personnel_number,
+	                'purpose', purpose,
+	                'fare', fare,
+	                'house_rent', house_rent
+	            ) ORDER BY id desc
+	        ) AS table_rows
+	    FROM (
+			select
+				*,
+				row_number() OVER (
+	                PARTITION BY operation_number
+	                ORDER BY id DESC
+	            ) AS rn
+			from hr.business_trip
 		)
-	) bt
-	inner join hr.trip_type tt
-	on bt.trip_type_id = tt.id
-	inner join (
-		select id, firstname, lastname, middlename 
-		from hr.staff where status = 1	
-	) s
-	on bt.staff_id = s.id
-	left join (
-		select id, country, cities from commons.countries
-	) con 
-	on tt.foreign_travel = con.id
-	left join (
-		select table_id, intercity, fare from commons.local_trip_prices
-	) ltp
-	on tt.local_travel = ltp.table_id;
+	    GROUP BY operation_number
+	),
+	bt as (
+		SELECT jsonb_build_object(
+			'operation_number', btp.operation_number,
+	        'doc_id', btp.doc_id,
+	        'abroad_trip', btp.abroad_trip,
+	        'destination', btp.destination,
+	        'visiting_organization', btp.visiting_organization,
+	        'description', btp.description,
+	        'created_date', btp.created_date,
+			'table_rows', bttr.table_rows
+		) as paginated
+		FROM bt_parent btp
+		JOIN bt_table_rows bttr 
+		USING (operation_number)
+	)
+	select bt.paginated into _result from bt;
 
-	return _result;
-END;
+	return json_build_object(
+		'result', _result,
+		'status', 200
+	);
+END
 $BODY$;
-
-
-
-
-
-
-
-
 
 
 
 
 /*
-	ALL BUSINESS TRIP
+	LAST NUMBER
 */
-CREATE OR REPLACE FUNCTION accounting.get_staff_all_business_trip(
-	_staff_id bigint,
-	_department_id bigint,
-	_year integer)
-    RETURNS json
+CREATE OR REPLACE FUNCTION hr.get_business_trip_last_operation_number()
+    RETURNS bigint
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
-declare
-	_result json;
-begin
+	DECLARE	
+		_operation_number bigint;
+	BEGIN
 
-	select json_agg(row_to_json(bt)) 
-	into _result
-	from hr.business_trip bt
-	where staff_id = _staff_id 
-	and department_id = _department_id
-	and (
-		extract(year from start_date) = coalesce(_year, extract(year from current_date))
-		or
-		extract(year from end_date) = coalesce(_year, extract(year from current_date))
-	);
-
-	return _result;
-end;
+		select operation_number
+		into _operation_number
+		from hr.business_trip
+		group by operation_number
+		order by operation_number desc
+		limit 1;
+		
+		return _operation_number;
+	end;
 $BODY$;
-
-
-
 
 
 
@@ -458,7 +412,7 @@ $BODY$;
 /*
 	CERTIFICATE
 */
-CREATE OR REPLACE FUNCTION accounting.download_business_trip_certificate(
+CREATE OR REPLACE FUNCTION hr.download_business_trip_certificate(
 	_id bigint)
     RETURNS json
     LANGUAGE 'plpgsql'
@@ -512,31 +466,3 @@ $BODY$;
 
 
 
-
-
-
-
-/*
-	SAVE CERTIFICATE
-*/
-CREATE OR REPLACE FUNCTION accounting.save_business_trip_certificate(
-	_id bigint,
-	_doc_id bigint,
-	user_id text)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-begin
-	update hr.business_trip set
-		cirtificate_doc_id = _doc_id,
-		updated = jsonb_build_object(
-			'user_id', user_id::uuid,
-			'date', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::timestamp(0)
-		)
-	where id = _id;
-
-	return json_build_object('status', 200, 'msg', 'UPDATED!');
-end;
-$BODY$;
