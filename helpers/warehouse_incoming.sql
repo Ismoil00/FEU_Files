@@ -99,7 +99,7 @@ AS $BODY$
 					name_id, 
 					quantity,
 					unit_price, 
-					credit,
+					debit,
 					advance_credit,
 					vat,
 					unique_import_number,
@@ -115,7 +115,7 @@ AS $BODY$
 					_name_id,
 					_quantity,
 					_unit_price,
-					(_product->>'credit')::int,
+					(_product->>'debit')::int,
 					(_product->>'advance_credit')::int,
 					(_product->>'vat')::numeric,
 					_unique_import_number,
@@ -147,7 +147,7 @@ AS $BODY$
 					financing = _financing,
 					name_id = _name_id,
 					unit_price = _unit_price,
-					credit = (_product->>'credit')::int,
+					debit = (_product->>'debit')::int,
 					advance_credit = (_product->>'advance_credit')::int,
 					vat = (_product->>'vat')::numeric,
 					quantity = _quantity,
@@ -219,7 +219,7 @@ AS $BODY$
 	            'name_id', wi.name_id,
 	            'unit_price', wi.unit_price,
 	            'quantity', wi.quantity,
-				'credit', wi.credit,
+				'debit', wi.debit,
 				'advance_credit', wi.advance_credit,
 				'vat', wi.vat
 	        )) products
@@ -359,7 +359,7 @@ begin
 	            'name_id', wi.name_id,
 	            'unit_price', wi.unit_price,
 	            'quantity', wi.quantity,
-				'credit', wi.credit,
+				'debit', wi.debit,
 				'advance_credit', wi.advance_credit,
 				'vat', wi.vat
 	        )) products
@@ -493,16 +493,17 @@ select accounting.warehouse_incoming_update_validation(
 
 CREATE OR REPLACE FUNCTION accounting.warehouse_incoming_update_validation(
 	_id bigint,
-    _location_id bigint,
-    _name_id bigint,
-    _import_id bigint,
-    _quantity numeric,
-    _unit_price numeric,
-    _financing accounting.budget_distribution_type
-)
-RETURNS void
-LANGUAGE plpgsql
-AS $$
+	_location_id bigint,
+	_name_id bigint,
+	_import_id bigint,
+	_quantity numeric,
+	_unit_price numeric,
+	_financing accounting.budget_distribution_type)
+    RETURNS void
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
 DECLARE
     _left_quantity numeric;
     product_name text;
@@ -558,9 +559,7 @@ BEGIN
 				unit_price,
 				storage_location_id as to_storage_location_id,
 				null::bigint as from_storage_location_id,
-				sum(quantity) as quantity,
-				min((created->>'date')::date) as created_date,
-				min(credit) as credit
+				sum(quantity) as quantity
 			FROM accounting.warehouse_incoming
 			where name_id = _name_id
 			and unique_import_number = _import_id
@@ -577,9 +576,7 @@ BEGIN
 		        unit_price,
 				to_storage_location_id,
 				from_storage_location_id,
-				quantity,
-				moved_at::date as created_date,
-				credit
+				quantity
 			FROM accounting.product_transfer
 			where name_id = _name_id
 			and import_id = _import_id
@@ -600,9 +597,7 @@ BEGIN
 		        import_id,
 		        unit_price,
 		        to_storage_location_id AS location_id,
-		        SUM(quantity) AS quantity,
-				min(created_date) as created_date,
-				min(credit) as credit
+		        SUM(quantity) AS quantity
 		    FROM all_warehouses
 		    GROUP BY name_id, import_id, unit_price, to_storage_location_id
 		),
@@ -625,9 +620,7 @@ BEGIN
 		        COALESCE(mi.import_id, mo.import_id) AS import_id,
 		        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
 		        COALESCE(mi.location_id, mo.location_id) AS location_id,
-		        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
-				mi.created_date,
-				mi.credit
+		        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity
 		    FROM movement_incoming mi
 		    FULL JOIN movement_outgoing mo
 		    ON mi.name_id = mo.name_id
@@ -682,7 +675,7 @@ BEGIN
 	    END IF;
 	END IF;
 END;
-$$;
+$BODY$;
 
 
 
