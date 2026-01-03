@@ -23,6 +23,8 @@ update hr.staff_schedule set
 	month_closed = false
 where month_closed is true
 
+-- truncate hr.staff_schedule
+
 
 
 CREATE OR REPLACE FUNCTION hr.get_schedules(jdata json)
@@ -120,13 +122,13 @@ BEGIN
 		    staff_id, 
 		   	date,
 		    marker_id,
-			day_type_id,
+			hours,
 		    created
 		) VALUES (
 		    (_staff->>'staff_id')::bigint,
 		    (_staff->>'date')::date,
 		    (_staff->>'marker_id')::bigint,
-		    (_staff->>'day_type_id')::bigint,
+		    (_staff->>'hours')::integer,
 			_created
 		)
 		ON CONFLICT (staff_id, date)
