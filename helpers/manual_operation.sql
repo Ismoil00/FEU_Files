@@ -1,3 +1,24 @@
+
+
+
+
+
+
+
+		select accounting.get_manual_operations (
+			'budget',
+			null,
+			null,
+			null,
+			null,
+			100,
+			0
+		)
+
+
+
+
+
 CREATE OR REPLACE FUNCTION accounting.get_manual_operations(
 	_financing accounting.budget_distribution_type,
 	_operation_number bigint DEFAULT NULL::bigint,
@@ -88,6 +109,18 @@ AS $BODY$
 		_entry jsonb;
 		isUpdate boolean = false;
 	BEGIN
+
+		/* GENERATING _operation_number for INSERTION */
+		if _operation_number is null then
+			SELECT coalesce(max(sub.operation_number), 0) + 1
+			into _operation_number from (
+				SELECT operation_number
+	        	FROM accounting.manual_operations
+	        	GROUP BY operation_number
+	        	ORDER BY operation_number DESC
+	        	LIMIT 1
+			) sub;
+		end if;
 
 		-- loop
 		FOR _entry IN SELECT * FROM jsonb_array_elements((jdata->>'entries')::jsonb) LOOP

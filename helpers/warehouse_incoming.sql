@@ -6,6 +6,8 @@ select * from accounting.warehouse_total_routing;
 
 
 
+
+
 CREATE OR REPLACE FUNCTION accounting.upsert_warehouse_incoming(
 	jdata json)
     RETURNS json
@@ -100,6 +102,7 @@ AS $BODY$
 					quantity,
 					unit_price, 
 					debit,
+					credit,
 					advance_credit,
 					vat,
 					unique_import_number,
@@ -116,6 +119,7 @@ AS $BODY$
 					_quantity,
 					_unit_price,
 					(_product->>'debit')::int,
+					(_product->>'credit')::int,
 					(_product->>'advance_credit')::int,
 					(_product->>'vat')::numeric,
 					_unique_import_number,
@@ -148,6 +152,7 @@ AS $BODY$
 					name_id = _name_id,
 					unit_price = _unit_price,
 					debit = (_product->>'debit')::int,
+					credit = (_product->>'credit')::int,
 					advance_credit = (_product->>'advance_credit')::int,
 					vat = (_product->>'vat')::numeric,
 					quantity = _quantity,
@@ -203,30 +208,48 @@ AS $BODY$
 		_result json;
 	BEGIN
 
-	with incomings as (
-		select  
-			wi.unique_import_number,
-			min(wi.order_number) order_number,
-			min(wi.financing) financing,
-	        min(wi.doc_id) doc_id,
-	        min(wi.counterparty_id) counterparty_id,
-	        min(wi.status) status,
-			min((wi.created->>'date')::date) created_date,
-	        min(wi.comment) comment,
-	        min(wi.contract) contract,
-	        jsonb_agg(jsonb_build_object(
-	            'id', wi.id,
-	            'name_id', wi.name_id,
-	            'unit_price', wi.unit_price,
-	            'quantity', wi.quantity,
-				'debit', wi.debit,
-				'advance_credit', wi.advance_credit,
-				'vat', wi.vat
-	        )) products
-		from accounting.warehouse_incoming wi
-		where wi.unique_import_number = _unique_import_number
-		group by wi.unique_import_number
-	), routing_1 as (
+	with incomings_parent as (
+	 	SELECT DISTINCT ON (wi.unique_import_number)
+		 		wi.unique_import_number,
+				wi.financing,
+				wi.order_number,
+	        	wi.doc_id,
+	        	wi.counterparty_id,
+	        	wi.status,
+				(wi.created->>'date')::date created_date,
+	        	wi.comment,
+				wi.contract
+		    FROM accounting.warehouse_incoming wi
+		    where wi.unique_import_number = _unique_import_number
+		    ORDER BY wi.unique_import_number, wi.id
+	),
+	incomings_child AS (
+	    SELECT 
+	        wi.unique_import_number,
+	        jsonb_agg(
+	            jsonb_build_object(
+	                'id', wi.id,
+	            	'name_id', wi.name_id,
+	            	'unit_price', wi.unit_price,
+	            	'quantity', wi.quantity,
+					'debit', wi.debit,
+					'credit', wi.credit,
+					'advance_credit', wi.advance_credit,
+					'vat', wi.vat
+	            ) ORDER BY wi.name_id
+	        ) AS products
+	    FROM accounting.warehouse_incoming wi
+	    GROUP BY wi.unique_import_number
+	),
+	incomings as (
+		SELECT 
+		    p.*,
+		    c.products
+		FROM incomings_parent p
+		JOIN incomings_child c 
+		USING (unique_import_number)
+	),
+	routing_1 as (
 		select
 			wtr.warehouse_id,
 			row_number() over(
@@ -343,35 +366,54 @@ begin
 	and (_date_from is null or (wi.created->>'date')::date >= _date_from::date)
 	and (_date_to is null or (wi.created->>'date')::date <= _date_to::date);
 
-	with incomings as (
-		select
-			wi.unique_import_number,
-			min(wi.financing) financing,
-			min(wi.order_number) order_number,
-	        min(wi.doc_id) doc_id,
-	        min(wi.counterparty_id) counterparty_id,
-	        min(wi.status) status,
-			min((wi.created->>'date')::date) created_date,
-	        min(wi.comment) comment,
-			min(wi.contract) contract,
-	        jsonb_agg(jsonb_build_object(
-	            'id', wi.id,
-	            'name_id', wi.name_id,
-	            'unit_price', wi.unit_price,
-	            'quantity', wi.quantity,
-				'debit', wi.debit,
-				'advance_credit', wi.advance_credit,
-				'vat', wi.vat
-	        )) products
-		from accounting.warehouse_incoming wi
-		where financing = _financing
-		and (wi.order_number = _order_number or _order_number is null)
-		and (wi.counterparty_id = _counterparty_id or _counterparty_id is null)
-		and (_name_id is null or wi.unique_import_number = any(_unique_import_numbers))
-		and (_date_from is null or (wi.created->>'date')::date >= _date_from::date)
-		and (_date_to is null or (wi.created->>'date')::date <= _date_to::date)
-		group by wi.unique_import_number
-	), routing_1 as (
+	-- main query
+	with incomings_parent as (
+	 	SELECT DISTINCT ON (wi.unique_import_number)
+		 		wi.unique_import_number,
+				wi.financing,
+				wi.order_number,
+	        	wi.doc_id,
+	        	wi.counterparty_id,
+	        	wi.status,
+				(wi.created->>'date')::date created_date,
+	        	wi.comment,
+				wi.contract
+		    FROM accounting.warehouse_incoming wi
+		    where financing = _financing
+			and (wi.order_number = _order_number or _order_number is null)
+			and (wi.counterparty_id = _counterparty_id or _counterparty_id is null)
+			and (_name_id is null or wi.unique_import_number = any(_unique_import_numbers))
+			and (_date_from is null or (wi.created->>'date')::date >= _date_from::date)
+			and (_date_to is null or (wi.created->>'date')::date <= _date_to::date)
+		    ORDER BY wi.unique_import_number, wi.id
+	),
+	incomings_child AS (
+	    SELECT 
+	        wi.unique_import_number,
+	        jsonb_agg(
+	            jsonb_build_object(
+	                'id', wi.id,
+	            	'name_id', wi.name_id,
+	            	'unit_price', wi.unit_price,
+	            	'quantity', wi.quantity,
+					'debit', wi.debit,
+					'credit', wi.credit,
+					'advance_credit', wi.advance_credit,
+					'vat', wi.vat
+	            ) ORDER BY wi.name_id
+	        ) AS products
+	    FROM accounting.warehouse_incoming wi
+	    GROUP BY wi.unique_import_number
+	),
+	incomings as (
+		SELECT 
+		    p.*,
+		    c.products
+		FROM incomings_parent p
+		JOIN incomings_child c 
+		USING (unique_import_number)
+	),
+	routing_1 as (
 		select
 			wtr.warehouse_id,
 			row_number() over(

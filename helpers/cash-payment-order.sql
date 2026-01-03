@@ -5,7 +5,7 @@ create table if not exists accounting.cash_payment_order
 	amount numeric not null,
 	credit integer not null default 111110,
 	debit integer not null,
-	advance_account_debit integer not null,
+	advance_debit integer not null,
 	description text not null,
 	
 	given_to text not null,
@@ -18,6 +18,18 @@ create table if not exists accounting.cash_payment_order
 
 
 select * from accounting.cash_payment_order;
+
+
+		select accounting.get_cash_payment_order (
+			'budget',
+			null,
+			null,
+			null,
+			null,
+			null,
+			100,
+			0
+		)
 
 
 CREATE OR REPLACE FUNCTION accounting.get_cash_payment_order(
@@ -39,6 +51,19 @@ AS $BODY$
 	BEGIN
 
 		with main as (
+			select *
+			from accounting.cash_payment_order
+			where financing = _financing 
+			and (_id is null or id = _id)
+			and (_date_from is null or _date_from::date <= (created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (created->>'date')::date)
+			and (_cash_flow_article_id is null or _cash_flow_article_id = cash_flow_article_id)
+			and (_debit is null or _debit = debit)
+		),
+		total_count as (
+			select count(*) total from main
+		),
+		paginated as (
 			select jsonb_build_object(
 				'key', row_number() over(order by id),
 				'id', id,
@@ -46,7 +71,7 @@ AS $BODY$
 				'cash_flow_article_id', cash_flow_article_id,
 				'amount', amount,
 				'debit', debit,
-				'advance_account_debit', advance_account_debit,
+				'advance_debit', advance_debit,
 				'description', description,
 				'created_date', (created->>'date')::date,
 				'based_on', based_on,
@@ -57,15 +82,14 @@ AS $BODY$
 				'counterparty_id', counterparty_id,
 				'contract', contract
 			) aggregated
-			from accounting.cash_payment_order
-			where financing = _financing 
-			and (_id is null or id = _id)
-			and (_date_from is null or _date_from::date <= (created->>'date')::date)
-			and (_date_to is null or _date_to::date >= (created->>'date')::date)
-			and (_cash_flow_article_id is null or _cash_flow_article_id = cash_flow_article_id)
-			and (_debit is null or _debit = debit)
+			from main
 			order by id limit _limit offset _offset
-		) select jsonb_agg(m.aggregated) into _result from main m;
+		) 
+		select jsonb_build_object(
+			'results', jsonb_agg(p.aggregated),
+			'total', (select total from total_count),
+			'status', 200
+		) into _result from paginated p;
 
 		return _result;
 	end;
@@ -97,7 +121,7 @@ AS $BODY$
 				cash_flow_article_id,
 				amount,
 				debit,
-				advance_account_debit,
+				advance_debit,
 				description,
 				based_on,
 				
@@ -113,7 +137,7 @@ AS $BODY$
 				(jdata->>'cash_flow_article_id')::bigint,
 				(jdata->>'amount')::numeric,
 				(jdata->>'debit')::integer,
-				(jdata->>'advance_account_debit')::integer,
+				(jdata->>'advance_debit')::integer,
 				(jdata->>'description')::text,
 				(jdata->>'based_on')::text,
 				
@@ -134,7 +158,7 @@ AS $BODY$
 				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
 				amount = (jdata->>'amount')::numeric,
 				debit = (jdata->>'debit')::integer,
-				advance_account_debit = (jdata->>'advance_account_debit')::integer,
+				advance_debit = (jdata->>'advance_debit')::integer,
 				description = (jdata->>'description')::text,
 				based_on = (jdata->>'based_on')::text,
 				

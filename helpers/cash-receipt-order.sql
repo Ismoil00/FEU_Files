@@ -5,7 +5,7 @@ create table if not exists accounting.cash_receipt_order
 	amount numeric not null,
 	debit integer not null default 111110,
 	credit integer not null,
-	advance_account_credit integer not null,
+	advance_credit integer not null,
 	description text not null,
 	
 	excepted_from text not null,
@@ -16,6 +16,19 @@ create table if not exists accounting.cash_receipt_order
 );
 
 
+select * from accounting.cash_receipt_order
+
+
+		select accounting.get_cash_receipt_order (
+			'special',
+			null,
+			null,
+			null,
+			null,
+			null,
+			100,
+			0
+		)
 
 
 CREATE OR REPLACE FUNCTION accounting.get_cash_receipt_order (
@@ -37,20 +50,7 @@ AS $BODY$
 	BEGIN
 
 		with main as (
-			select jsonb_build_object(
-				'key', row_number() over(order by id),
-				'id', id,
-				'financing', financing,
-				'cash_flow_article_id', cash_flow_article_id,
-				'amount', amount,
-				'credit', credit,
-				'advance_account_credit', advance_account_credit,
-				'description', description,
-				'created_date', (created->>'date')::date,
-				
-				'excepted_from', excepted_from,
-				'based_on', based_on
-			) aggregated
+			select *
 			from accounting.cash_receipt_order
 			where financing = _financing 
 			and (_id is null or id = _id)
@@ -58,8 +58,33 @@ AS $BODY$
 			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_cash_flow_article_id is null or _cash_flow_article_id = cash_flow_article_id)
 			and (_credit is null or _credit = credit)
+		),
+		total_count as (
+			select count(*) total from main
+		),
+		paginated as (
+			select jsonb_build_object(
+				'key', row_number() over(order by id),
+				'id', id,
+				'financing', financing,
+				'cash_flow_article_id', cash_flow_article_id,
+				'amount', amount,
+				'credit', credit,
+				'advance_credit', advance_credit,
+				'description', description,
+				'created_date', (created->>'date')::date,
+				
+				'excepted_from', excepted_from,
+				'based_on', based_on
+			) aggregated
+			from main
 			order by id limit _limit offset _offset
-		) select jsonb_agg(m.aggregated) into _result from main m;
+		)
+		select jsonb_build_object(
+			'results', jsonb_agg(p.aggregated),
+			'total', (select total from total_count),
+			'status', 200
+		) into _result from paginated p;
 
 		return _result;
 	end;
@@ -91,7 +116,7 @@ AS $BODY$
 				cash_flow_article_id,
 				amount,
 				credit,
-				advance_account_credit,
+				advance_credit,
 				description,
 				
 				excepted_from,
@@ -103,7 +128,7 @@ AS $BODY$
 				(jdata->>'cash_flow_article_id')::bigint,
 				(jdata->>'amount')::numeric,
 				(jdata->>'credit')::integer,
-				(jdata->>'advance_account_credit')::integer,
+				(jdata->>'advance_credit')::integer,
 				(jdata->>'description')::text,
 				
 				(jdata->>'excepted_from')::text,
@@ -120,7 +145,7 @@ AS $BODY$
 				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
 				amount = (jdata->>'amount')::numeric,
 				credit = (jdata->>'credit')::integer,
-				advance_account_credit = (jdata->>'advance_account_credit')::integer,
+				advance_credit = (jdata->>'advance_credit')::integer,
 				description = (jdata->>'description')::text,
 				
 				excepted_from = (jdata->>'excepted_from')::text,

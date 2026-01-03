@@ -8,7 +8,7 @@ create table if not exists accounting.payment_order_incoming (
 	amount numeric not null,
 	debit integer not null default 111254,
 	credit integer not null,
-	advance_account_credit integer not null,
+	advance_credit integer not null,
 	description text not null,
 	created jsonb not null,
 	updated jsonb
@@ -42,7 +42,7 @@ AS $BODY$
 				cash_flow_article_id,
 				amount,
 				credit,
-				advance_account_credit,
+				advance_credit,
 				description,
 				created
 			) values (
@@ -53,7 +53,7 @@ AS $BODY$
 				(jdata->>'cash_flow_article_id')::bigint,
 				(jdata->>'amount')::numeric,
 				(jdata->>'credit')::integer,
-				(jdata->>'advance_account_credit')::integer,
+				(jdata->>'advance_credit')::integer,
 				(jdata->>'description')::text,
 				jsonb_build_object(
 					'user_id', _user_id,
@@ -69,7 +69,7 @@ AS $BODY$
 				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
 				amount = (jdata->>'amount')::numeric,
 				credit = (jdata->>'credit')::integer,
-				advance_account_credit = (jdata->>'advance_account_credit')::integer,
+				advance_credit = (jdata->>'advance_credit')::integer,
 				description = (jdata->>'description')::text,
 				created = CASE
     			    WHEN _created_date IS NOT NULL
@@ -101,6 +101,19 @@ select * from accounting.payment_order_incoming
 
 
 
+		select accounting.get_cash_payment_order (
+			'budget',
+			null,
+			null,
+			null,
+			null,
+			null,
+			100,
+			0
+		)
+
+
+
 CREATE OR REPLACE FUNCTION accounting.get_payment_order_incoming(
 	_financing accounting.budget_distribution_type,
 	_id bigint DEFAULT NULL::bigint,
@@ -120,6 +133,19 @@ AS $BODY$
 	BEGIN
 
 		with main as (
+			select *
+			from accounting.payment_order_incoming
+			where financing = _financing 
+			and (_id is null or id = _id)
+			and (_date_from is null or _date_from::date <= (created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (created->>'date')::date)
+			and (_bank_account_id is null or _bank_account_id = bank_account_id)
+			and (_counterparty_id is null or _counterparty_id = counterparty_id)
+		),
+		total_count as (
+			select count(*) total from main
+		),
+		paginated as (
 			select jsonb_build_object(
 				'key', row_number() over(order by id),
 				'id', id,
@@ -129,20 +155,19 @@ AS $BODY$
 				'cash_flow_article_id', cash_flow_article_id,
 				'amount', amount,
 				'credit', credit,
-				'advance_account_credit', advance_account_credit,
+				'advance_credit', advance_credit,
 				'description', description,
 				'counterparty_contract', counterparty_contract,
 				'created_date', (created->>'date')::date
 			) aggregated
-			from accounting.payment_order_incoming
-			where financing = _financing 
-			and (_id is null or id = _id)
-			and (_date_from is null or _date_from::date <= (created->>'date')::date)
-			and (_date_to is null or _date_to::date >= (created->>'date')::date)
-			and (_bank_account_id is null or _bank_account_id = bank_account_id)
-			and (_counterparty_id is null or _counterparty_id = counterparty_id)
+			from main
 			order by id limit _limit offset _offset
-		) select jsonb_agg(m.aggregated) into _result from main m;
+		)
+		select jsonb_build_object(
+			'results', jsonb_agg(p.aggregated),
+			'total', (select total from total_count),
+			'status', 200
+		) into _result from paginated p;
 
 		return _result;
 	end;

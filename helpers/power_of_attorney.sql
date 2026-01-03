@@ -15,6 +15,17 @@ create table if not exists accounting.attorney_power (
 select * from accounting.attorney_power;
 
 
+		select accounting.get_attorney_power (
+			'budget',
+			null,
+			null,
+			null,
+			null,
+			null,
+			100,
+			0
+		)
+		
 CREATE OR REPLACE FUNCTION accounting.get_attorney_power(
 	_financing accounting.budget_distribution_type,
 	_id bigint DEFAULT NULL::bigint,
@@ -34,6 +45,19 @@ AS $BODY$
 	BEGIN
 
 		with main as (
+			select *
+			from accounting.attorney_power
+			where financing = _financing 
+			and (_id is null or id = _id)		
+			and (_date_from is null or _date_from::date <= (created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (created->>'date')::date)
+			and (_staff_id is null or _staff_id = staff_id)
+			and (_counterparty_id is null or _counterparty_id = counterparty_id)
+		), 
+		total_count as (
+			select count(*) total from main
+		),
+		paginated as (
 			select jsonb_build_object(
 				'key', row_number() over(order by id),
 				'id', id,
@@ -47,15 +71,14 @@ AS $BODY$
 				'table_data', table_data,
 				'created_date', (created->>'date')::date
 			) aggregated
-			from accounting.attorney_power
-			where financing = _financing 
-			and (_id is null or id = _id)		
-			and (_date_from is null or _date_from::date <= (created->>'date')::date)
-			and (_date_to is null or _date_to::date >= (created->>'date')::date)
-			and (_staff_id is null or _staff_id = staff_id)
-			and (_counterparty_id is null or _counterparty_id = counterparty_id)
+			from main
 			order by id limit _limit offset _offset
-		) select jsonb_agg(m.aggregated) into _result from main m;
+		) 
+		select jsonb_build_object(
+			'results', jsonb_agg(p.aggregated),
+			'total', (select total from total_count),
+			'status', 200
+		) into _result from paginated p;
 
 		return _result;
 	end;

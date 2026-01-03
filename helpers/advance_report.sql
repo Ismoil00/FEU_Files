@@ -5,6 +5,7 @@ create table if not exists accounting.advance_report (
 	staff_id bigint not null references hr.staff(id),
 	purpose text not null,
 	credit integer not null default 114610,
+	debit integer not null,
 	advance_type accounting.advance_type not null,
 	table_data jsonb not null,
 	created jsonb not null,
@@ -14,7 +15,12 @@ create table if not exists accounting.advance_report (
 
 select * from accounting.advance_report;
 
-CREATE OR REPLACE FUNCTION accounting.upsert_advance_report(jdata json)
+
+
+
+
+CREATE OR REPLACE FUNCTION accounting.upsert_advance_report(
+	jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
@@ -39,7 +45,7 @@ AS $BODY$
 				financing,
 				staff_id,
 				purpose,
-				credit,
+				debit,
 				advance_type,
 				table_data,
 				created
@@ -47,7 +53,7 @@ AS $BODY$
 				_financing,
 				(jdata->>'staff_id')::bigint,
 				(jdata->>'purpose')::text,
-				(jdata->>'credit')::integer,
+				(jdata->>'debit')::integer,
 				(jdata->>'advance_type')::accounting.advance_type,
 				(jdata->>'table_data')::jsonb,
 				jsonb_build_object(
@@ -61,8 +67,7 @@ AS $BODY$
 				financing = _financing,
 				staff_id = (jdata->>'staff_id')::bigint,
 				purpose = (jdata->>'purpose')::text,
-				credit = case when jdata->>'credit' is not null 
-					then (jdata->>'credit')::integer else ar.credit end,
+				debit = (jdata->>'debit')::integer,
 				advance_type = (jdata->>'advance_type')::accounting.advance_type,
 				table_data = (jdata->>'table_data')::jsonb,
 				created = CASE
@@ -100,7 +105,7 @@ CREATE OR REPLACE FUNCTION accounting.get_advance_report(
 	_date_from text DEFAULT NULL::text,
 	_date_to text DEFAULT NULL::text,
 	_staff_id bigint DEFAULT NULL::bigint,
-	_credit bigint DEFAULT NULL::bigint,
+	_debit integer DEFAULT NULL::integer,
 	_limit integer DEFAULT 1000,
 	_offset integer DEFAULT 0
 )
@@ -114,26 +119,38 @@ AS $BODY$
 	BEGIN
 
 		with main as (
-			select jsonb_build_object(
-				'key', row_number() over(order by id),
-				'id', id,
-				'financing', financing,
-				'staff_id', staff_id,
-				'purpose', purpose,
-				'credit', credit,
-				'advance_type', advance_type,
-				'table_data', table_data,
-				'created_date', (created->>'date')::date
-			) aggregated
+			select *
 			from accounting.advance_report
 			where financing = _financing 
 			and (_id is null or id = _id)
 			and (_date_from is null or _date_from::date <= (created->>'date')::date)
 			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_staff_id is null or _staff_id = staff_id)
-			and (_credit is null or _credit = credit)
+			and (_debit is null or _debit = debit)
+		),
+		total_count as (
+			select count(*) total from main
+		),
+		paginated as (
+			select jsonb_build_object(
+				'key', row_number() over(order by id),
+				'id', id,
+				'financing', financing,
+				'staff_id', staff_id,
+				'purpose', purpose,
+				'debit', debit,
+				'advance_type', advance_type,
+				'table_data', table_data,
+				'created_date', (created->>'date')::date
+			) aggregated
+			from accounting.advance_report
 			order by id limit _limit offset _offset
-		) select jsonb_agg(m.aggregated) into _result from main m;
+		)
+		select jsonb_build_object(
+			'results', jsonb_agg(p.aggregated),
+			'total', (select total from total_count),
+			'status', 200
+		) into _result from paginated p;
 
 		return _result;
 	end;
