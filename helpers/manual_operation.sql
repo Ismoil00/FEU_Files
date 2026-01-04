@@ -5,18 +5,6 @@
 
 
 
-		select accounting.get_manual_operations (
-			'budget',
-			null,
-			null,
-			null,
-			null,
-			100,
-			0
-		)
-
-
-
 
 
 CREATE OR REPLACE FUNCTION accounting.get_manual_operations(
@@ -34,8 +22,30 @@ CREATE OR REPLACE FUNCTION accounting.get_manual_operations(
 AS $BODY$
 	DECLARE	
 		_result json;
+		_total_count integer;
 	BEGIN
 
+		-- total
+		with filtered as (
+			select distinct mo.operation_number
+			from accounting.manual_operations mo
+			left join (
+				select 
+					a.id,
+					concat_ws(' ', s.lastname, s.firstname, s.middlename) fullname
+				from auth.user a
+				left join hr.staff s
+				on a.staff_id = s.id
+			) us on (mo.created->>'user_id')::uuid = us.id
+			where financing = _financing
+			and (_operation_number is null or _operation_number = mo.operation_number)
+			and (_date_from is null or _date_from::date <= (mo.created->>'date')::date)
+			and (_date_to is null or _date_to::date >= (mo.created->>'date')::date)
+			and (_user_id is null or _user_id::uuid = us.id)
+		)
+		select count(*) into _total_count from filtered;
+
+		-- main
 		with main as (
 			select
 				mo.operation_number,
@@ -44,8 +54,10 @@ AS $BODY$
 				(mo.created->>'date')::date created_date,
 				mo.amount,
 				mo.financing,
+				mo.subconto_type,
 				jsonb_build_object(
 					'id', mo.id,
+					'subconto_name', mo.subconto_name,
 					'debit', mo.debit,
 					'credit', mo.credit,
 					'amount', mo.amount,
@@ -79,7 +91,11 @@ AS $BODY$
 				'entries', jsonb_agg(jsnb)
 			) aggregated from main
 			group by operation_number
-		) select jsonb_agg(g.aggregated) into _result from grouped g;
+		) select jsonb_build_object(
+			'results', jsonb_agg(g.aggregated),
+			'total', _total_count,
+			'status', 200
+		) into _result from grouped g;
 
 		return _result;
 	end;
@@ -87,7 +103,11 @@ $BODY$;
 
 
 
+
+
 select * from accounting.manual_operations
+
+
 
 
 
@@ -105,6 +125,7 @@ AS $BODY$
 		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
 		_operation_number bigint = (jdata->>'operation_number')::bigint;
 		_created_date date = (jdata->>'created_date')::date;
+		_subconto_type text = jdata->>'subconto_type';
 		
 		_entry jsonb;
 		isUpdate boolean = false;
@@ -128,6 +149,8 @@ AS $BODY$
 				insert into accounting.manual_operations (
 					financing,
 					operation_number,
+					subconto_type,
+					subconto_name,
 					debit,
 					credit,
 					amount,
@@ -136,10 +159,12 @@ AS $BODY$
 				) values (
 					_financing,
 					_operation_number,
+					_subconto_type,
+					_entry->>'subconto_name',
 					(_entry->>'debit')::integer,
 					(_entry->>'credit')::integer,
 					(_entry->>'amount')::numeric,
-					(_entry->>'description')::text,
+					_entry->>'description',
 					jsonb_build_object(
 						'user_id', _user_id,
 						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
@@ -149,10 +174,12 @@ AS $BODY$
 				isUpdate = true;
 				update accounting.manual_operations mo SET
 					financing = _financing,
+					subconto_type = _subconto_type,
+					subconto_name = _entry->>'subconto_name',
 					debit = (_entry->>'debit')::integer,
 					credit = (_entry->>'credit')::integer,
 					amount = (_entry->>'amount')::numeric,
-					description = (_entry->>'description')::text,
+					description = _entry->>'description',
 					created = CASE
     				    WHEN _created_date IS NOT NULL
     				    THEN jsonb_set(
@@ -176,3 +203,13 @@ AS $BODY$
 		);
 	end;
 $BODY$;
+
+
+
+
+
+
+
+
+
+
