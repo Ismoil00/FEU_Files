@@ -477,7 +477,7 @@ begin
 			from incomings i
 			left join routing_2 r2
 			on i.unique_import_number = r2.warehouse_id
-			order by i.order_number desc
+			-- order by i.order_number desc
 			limit _limit offset _offset
 		) select jsonb_agg(fj)
 		into _result

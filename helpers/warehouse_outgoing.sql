@@ -415,7 +415,7 @@ AS $BODY$
 			from outgoing og
 			left join routing_2 r2
 			on og.unique_outgoing_number = r2.warehouse_id
-			order by og.order_number desc 
+			-- order by og.order_number desc 
 			limit _limit offset _offset
 		) select jsonb_agg(fj)
 		into _result
