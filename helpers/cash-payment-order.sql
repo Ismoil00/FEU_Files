@@ -1,20 +1,4 @@
-create table if not exists accounting.cash_payment_order
-(
-	id bigserial primary key,
-	cash_flow_article_id bigint not null REFERENCES commons.accouting_cash_flow_articles(id),
-	amount numeric not null,
-	credit integer not null default 111110,
-	debit integer not null,
-	advance_debit integer not null,
-	description text not null,
-	
-	given_to text not null,
-	givent_to_document text not null,
-	based_on text not null,
-	
-	created jsonb not null,
-	updated jsonb
-);
+
 
 
 select * from accounting.cash_payment_order;
@@ -113,8 +97,25 @@ AS $BODY$
 		_created_date date = (jdata->>'created_date')::date;
 		_id bigint = (jdata->>'id')::bigint;
 		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
+		_amount numeric = (jdata->>'amount')::numeric;
+		_left_in_cash numeric = 0;
 	BEGIN
 
+		/* Cash Amount Check VALIDATION */
+		_left_in_cash = coalesce((
+			select sum(amount) 
+			from accounting.cash_receipt_order
+			where financing = _financing
+		), 0) - coalesce((
+			select sum(amount) 
+			from accounting.cash_payment_order
+			where financing = _financing
+		), 0);
+		if _left_in_cash < _amount then
+			RAISE EXCEPTION 'Запрошенная сумма "%" превышает остаток на кассе "%"', _amount, _left_in_cash;
+		end if;
+
+		-- upsert
 		if _id is null then
 			insert into accounting.cash_payment_order (
 				financing,
@@ -135,7 +136,7 @@ AS $BODY$
 			) values (
 				_financing,
 				(jdata->>'cash_flow_article_id')::bigint,
-				(jdata->>'amount')::numeric,
+				_amount,
 				(jdata->>'debit')::integer,
 				(jdata->>'advance_debit')::integer,
 				(jdata->>'description')::text,
@@ -156,7 +157,7 @@ AS $BODY$
 			update accounting.cash_payment_order cpo SET
 				financing = _financing,
 				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
-				amount = (jdata->>'amount')::numeric,
+				amount = _amount,
 				debit = (jdata->>'debit')::integer,
 				advance_debit = (jdata->>'advance_debit')::integer,
 				description = (jdata->>'description')::text,

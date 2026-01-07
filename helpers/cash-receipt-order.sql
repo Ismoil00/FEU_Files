@@ -1,22 +1,7 @@
-create table if not exists accounting.cash_receipt_order
-(
-	id bigserial primary key,
-	cash_flow_article_id bigint not null REFERENCES commons.accouting_cash_flow_articles(id),
-	amount numeric not null,
-	debit integer not null default 111110,
-	credit integer not null,
-	advance_credit integer not null,
-	description text not null,
-	
-	excepted_from text not null,
-	based_on text not null,
-	
-	created jsonb not null,
-	updated jsonb
-);
 
 
-select * from accounting.cash_receipt_order
+
+select * from accounting.cash_receipt_order;
 
 
 		select accounting.get_cash_receipt_order (
@@ -28,7 +13,7 @@ select * from accounting.cash_receipt_order
 			null,
 			100,
 			0
-		)
+		);
 
 
 CREATE OR REPLACE FUNCTION accounting.get_cash_receipt_order (
@@ -72,10 +57,14 @@ AS $BODY$
 				'credit', credit,
 				'advance_credit', advance_credit,
 				'description', description,
+				'based_on', based_on,
 				'created_date', (created->>'date')::date,
 				
-				'excepted_from', excepted_from,
-				'based_on', based_on
+				'received_from', received_from,
+				'staff_id', staff_id,
+				'staff_id_document', staff_id_document,
+				'counterparty_id', counterparty_id,
+				'contract', contract
 			) aggregated
 			from main
 			order by id limit _limit offset _offset
@@ -118,9 +107,13 @@ AS $BODY$
 				credit,
 				advance_credit,
 				description,
-				
-				excepted_from,
 				based_on,
+				
+				received_from,
+				staff_id,
+				staff_id_document,
+				counterparty_id,
+				contract,
 				
 				created
 			) values (
@@ -130,9 +123,13 @@ AS $BODY$
 				(jdata->>'credit')::integer,
 				(jdata->>'advance_credit')::integer,
 				(jdata->>'description')::text,
-				
-				(jdata->>'excepted_from')::text,
 				(jdata->>'based_on')::text,
+				
+				(jdata->>'received_from')::text,
+				(jdata->>'staff_id')::bigint,
+				(jdata->>'staff_id_document')::text,
+				(jdata->>'counterparty_id')::bigint,
+				(jdata->>'contract')::text,
 				
 				jsonb_build_object(
 					'user_id', _user_id,
@@ -147,9 +144,13 @@ AS $BODY$
 				credit = (jdata->>'credit')::integer,
 				advance_credit = (jdata->>'advance_credit')::integer,
 				description = (jdata->>'description')::text,
-				
-				excepted_from = (jdata->>'excepted_from')::text,
 				based_on = (jdata->>'based_on')::text,
+				
+				received_from = (jdata->>'received_from')::text,
+				staff_id = (jdata->>'staff_id')::bigint,
+				staff_id_document = (jdata->>'staff_id_document')::text,
+				counterparty_id = (jdata->>'counterparty_id')::bigint,
+				contract = (jdata->>'contract')::text,
 				
 				created = CASE
     			    WHEN _created_date IS NOT NULL
