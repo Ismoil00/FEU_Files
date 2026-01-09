@@ -6,8 +6,6 @@ select * from accounting.warehouse_total_routing;
 
 
 
-
-
 CREATE OR REPLACE FUNCTION accounting.upsert_warehouse_incoming(
 	jdata json)
     RETURNS json
@@ -24,7 +22,7 @@ AS $BODY$
 		_order_number bigint = (jdata->>'order_number')::bigint;
 		created_date date = (jdata->>'created_date')::date;
 		_comment text = (jdata->>'comment')::text;
-		_contract text = (jdata->>'contract')::text;
+		_contract_id bigint = (jdata->>'contract_id')::bigint;
 		_product jsonb;
 		isUpdate boolean = false;
 		_name_id bigint;
@@ -103,12 +101,11 @@ AS $BODY$
 					unit_price, 
 					debit,
 					credit,
-					advance_credit,
 					vat,
 					unique_import_number,
 					order_number,
 					comment,
-					contract,
+					contract_id,
 					storage_location_id,
 					created
 				) values (
@@ -120,12 +117,11 @@ AS $BODY$
 					_unit_price,
 					(_product->>'debit')::int,
 					(_product->>'credit')::int,
-					(_product->>'advance_credit')::int,
 					(_product->>'vat')::numeric,
 					_unique_import_number,
 					_order_number,
 					_comment,
-					_contract,
+					_contract_id,
 					1,
 					jsonb_build_object(
 						'user_id', _user_id,
@@ -153,11 +149,10 @@ AS $BODY$
 					unit_price = _unit_price,
 					debit = (_product->>'debit')::int,
 					credit = (_product->>'credit')::int,
-					advance_credit = (_product->>'advance_credit')::int,
 					vat = (_product->>'vat')::numeric,
 					quantity = _quantity,
 					comment = _comment,
-					contract = _contract,
+					contract_id = _contract_id,
 					created = CASE
     				    WHEN created_date IS NOT NULL
     				    THEN jsonb_set(
@@ -195,7 +190,6 @@ $BODY$;
 
 
 
-
 CREATE OR REPLACE FUNCTION accounting.get_warehouse_incoming_by_unique_import_number(
 	_unique_import_number bigint,
 	_department_id integer)
@@ -218,7 +212,7 @@ AS $BODY$
 	        	wi.status,
 				(wi.created->>'date')::date created_date,
 	        	wi.comment,
-				wi.contract
+				wi.contract_id
 		    FROM accounting.warehouse_incoming wi
 		    where wi.unique_import_number = _unique_import_number
 		    ORDER BY wi.unique_import_number, wi.id
@@ -234,7 +228,6 @@ AS $BODY$
 	            	'quantity', wi.quantity,
 					'debit', wi.debit,
 					'credit', wi.credit,
-					'advance_credit', wi.advance_credit,
 					'vat', wi.vat
 	            ) ORDER BY wi.name_id
 	        ) AS products
@@ -303,7 +296,8 @@ AS $BODY$
 		'financing', i.financing,
 		'doc_id', i.doc_id,
 		'counterparty_id', i.counterparty_id,
-		'contract', i.contract,
+		'contract_id', i.contract_id,
+		'contract', cc.contract,
 		'status', i.status,
 		'products', i.products,
 		'created_date', i.created_date,
@@ -311,7 +305,9 @@ AS $BODY$
 		'routing', r2.routing
 	) from incomings i into _result
 	left join routing_2 r2
-	on i.unique_import_number = r2.warehouse_id;
+	on i.unique_import_number = r2.warehouse_id
+	left join commons.counterparty_contracts cc
+	on i.contract_id = cc.id;
 
 		return jsonb_build_object(
 			'statusCode', 200,
@@ -377,7 +373,7 @@ begin
 	        	wi.status,
 				(wi.created->>'date')::date created_date,
 	        	wi.comment,
-				wi.contract
+				wi.contract_id
 		    FROM accounting.warehouse_incoming wi
 		    where financing = _financing
 			and (wi.order_number = _order_number or _order_number is null)
@@ -398,7 +394,6 @@ begin
 	            	'quantity', wi.quantity,
 					'debit', wi.debit,
 					'credit', wi.credit,
-					'advance_credit', wi.advance_credit,
 					'vat', wi.vat
 	            ) ORDER BY wi.name_id
 	        ) AS products
@@ -472,11 +467,14 @@ begin
 	        	i.products,
 	        	i.created_date,
 	        	i.comment,
-	        	i.contract,
+	        	i.contract_id,
+	        	cc.contract,
 				r2.routing
 			from incomings i
 			left join routing_2 r2
-			on i.unique_import_number = r2.warehouse_id
+				on i.unique_import_number = r2.warehouse_id
+			left join commons.counterparty_contracts cc
+				on i.contract_id = cc.id
 			-- order by i.order_number desc
 			limit _limit offset _offset
 		) select jsonb_agg(fj)
@@ -494,31 +492,6 @@ $BODY$;
 
 
 
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.get_warehouse_incoming_oder_number(
-	)
-    RETURNS bigint
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE	
-		_order_number bigint;
-	BEGIN
-
-		select order_number
-		into _order_number
-		from accounting.warehouse_incoming
-		group by order_number
-		order by order_number desc
-		limit 1;
-		
-		return _order_number;
-	end;
-$BODY$;
 
 
 select * from accounting.warehouse_incoming;

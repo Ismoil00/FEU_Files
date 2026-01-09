@@ -1,45 +1,74 @@
----- removed bank_details;
----- add new fields: 
 
-truncate accounting.counterparty CASCADE
 
-select * from accounting.counterparty
 
-where name = 'TEST';
-
-select accounting.get_all_counterparty()
-
-CREATE OR REPLACE FUNCTION accounting.get_all_counterparty(
-	)
+CREATE OR REPLACE FUNCTION accounting.upsert_counterparty(
+	jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
 DECLARE
-	_result json;
+	_id BIGINT = (jdata->>'id')::bigint;
+	_itn text = (jdata->>'itn')::text;
+	isUpdated boolean = false;
 BEGIN
 
-	SELECT json_agg(row_to_json(ac))
-	into _result
-	FROM (
-		select 
-			id, 
+	-- dublicate check!
+	if exists (
+		select 1 from accounting.counterparty
+		where itn = _itn and _id is null
+	) THEN
+		RAISE EXCEPTION 'Вы не можете сохранить 2 контрагента с одним ИНН.' USING ERRCODE = 'P0001';
+	end if;
+
+	-- upsert!
+	if _id is null THEN
+		insert into accounting.counterparty (
 			name, 
 			itn, 
-			details,
-			doc_id,
-			contracts,
-			bank_details,
-			(created->>'date')::date created_date
-		from accounting.counterparty
-	) ac;
-	
-	return _result;
+			details, 
+			doc_id, 
+			bank_details, 
+			created
+		) values (
+			(jdata->>'name')::text,
+			_itn,
+			(jdata->>'details')::jsonb,
+			(jdata->>'doc_id')::bigint,
+			(jdata->>'bank_details')::jsonb,
+			jsonb_build_object(
+				'user_id', (jdata->>'user_id')::uuid,
+				'date', localtimestamp(0)
+			)
+		) RETURNING id into _id;
+	ELSE
+		isUpdated = true;
+		update accounting.counterparty SET
+			name = (jdata->>'name')::text, 
+			itn = _itn, 
+			details = (jdata->>'details')::jsonb,
+			doc_id = (jdata->>'doc_id')::bigint,
+			bank_details = (jdata->>'bank_details')::jsonb, 
+			updated = 	jsonb_build_object(
+				'user_id', (jdata->>'user_id')::uuid,
+				'date', localtimestamp(0)
+			)
+		where id = _id;
+	end if;
+
+	return json_build_object(
+		'msg', case when isUpdated then 'updated' else 'created' end,
+		'status', 200,
+		'id', _id
+	);
 end;
 $BODY$;
 
------------------------------------------------------------
+
+
+
+select * FROM accounting.counterparty ac
 
 
 CREATE OR REPLACE FUNCTION accounting.get_counterparties(
@@ -48,8 +77,7 @@ CREATE OR REPLACE FUNCTION accounting.get_counterparties(
 	_bank_name text DEFAULT NULL::text,
 	_bank_account text DEFAULT NULL::text,
 	_limit integer DEFAULT 100,
-	_offset integer DEFAULT 0
-)
+	_offset integer DEFAULT 0)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
@@ -89,11 +117,25 @@ BEGIN
 			'itn', ac.itn,
 			'details', ac.details,
 			'doc_id', ac.doc_id,
-			'contracts', ac.contracts,
 			'bank_details', ac.bank_details,
+			'contracts', c.contracts,
 			'created_date', (ac.created->>'date')::date
 		) aggregated
 		FROM accounting.counterparty ac
+		left join (
+			select 
+				counterparty_id,
+				jsonb_agg(
+					jsonb_build_object(
+						'key', id,
+						'id', id,
+						'contract', contract,
+						'created_date', created_date
+					) order by id desc
+				) as contracts
+			from commons.counterparty_contracts
+			group by counterparty_id
+		) c on ac.id = c.counterparty_id
 		WHERE (_name IS NULL OR ac.name = _name)
 		AND (_itn IS NULL OR ac.itn = _itn)
 		AND (
@@ -120,8 +162,13 @@ BEGIN
 END;
 $BODY$;
 
---------------------------------------------------------------------
 
+
+
+
+drop function accounting.get_counterparty_contracts_by_id
+
+/* DELETED */
 CREATE OR REPLACE FUNCTION accounting.get_counterparty_contracts_by_id(
 	_id bigint)
     RETURNS json
@@ -142,73 +189,145 @@ BEGIN
 END;
 $BODY$;
 
---------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION accounting.upsert_counterparty(
-	jdata json)
+
+
+
+
+
+
+CREATE OR REPLACE FUNCTION accounting.get_all_counterparty(
+	)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
 DECLARE
-	_id BIGINT = (jdata->>'id')::bigint;
-	_itn text = (jdata->>'itn')::text;
-	isUpdated boolean = false;
+	_result json;
 BEGIN
 
-	-- dublicate check!
-	if exists (
-		select 1 from accounting.counterparty
-		where itn = _itn and _id is null
-	) THEN
-		RAISE EXCEPTION 'Вы не можете сохранить 2 контрагента с одним ИНН.' USING ERRCODE = 'P0001';
-	end if;
+	SELECT json_agg(row_to_json(ac))
+	into _result
+	FROM (
+		select 
+			id, 
+			name, 
+			itn, 
+			details,
+			doc_id,
+			bank_details,
+			(created->>'date')::date created_date
+		from accounting.counterparty
+	) ac;
+	
+	return _result;
+end;
+$BODY$;
+
+
+/*
+	CONTRACTS
+*/
+
+create table if not exists commons.counterparty_contracts (
+	id bigserial primary key,
+	contract text not null,
+	counterparty_id bigint references accounting.counterparty (id),
+    created_date TIMESTAMP WITHOUT TIME ZONE DEFAULT localtimestamp(0),
+    updated_date TIMESTAMP WITHOUT TIME ZONE
+);
+
+
+
+select * from commons.counterparty_contracts
+
+
+
+select commons.upsert_counterparty_contract (
+	149,
+	'TEXT 3',
+	6
+);
+
+
+
+
+
+CREATE OR REPLACE FUNCTION commons.upsert_counterparty_contract(
+	_counterparty_id bigint,
+	_contract text,
+	contract_id bigint default null
+)
+    RETURNS jsonb
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+	_id BIGINT = contract_id;
+BEGIN
 
 	-- upsert!
 	if _id is null THEN
-		insert into accounting.counterparty (
-			name, 
-			itn, 
-			details, 
-			doc_id, 
-			contracts,
-			bank_details, 
-			created
+		insert into commons.counterparty_contracts (
+			contract,
+			counterparty_id
 		) values (
-			(jdata->>'name')::text,
-			_itn,
-			(jdata->>'details')::jsonb,
-			(jdata->>'doc_id')::bigint,
-			(jdata->>'contracts')::jsonb,
-			(jdata->>'bank_details')::jsonb,
-			jsonb_build_object(
-				'user_id', (jdata->>'user_id')::uuid,
-				'date', localtimestamp(0)
-			)
-		) RETURNING id into _id;
+			_contract,
+			_counterparty_id
+		) returning id into _id;
 	ELSE
-		isUpdated = true;
-		update accounting.counterparty SET
-			name = (jdata->>'name')::text, 
-			itn = _itn, 
-			details = (jdata->>'details')::jsonb,
-			doc_id = (jdata->>'doc_id')::bigint, 
-			contracts = (jdata->>'contracts')::jsonb,
-			bank_details = (jdata->>'bank_details')::jsonb, 
-			updated = 	jsonb_build_object(
-				'user_id', (jdata->>'user_id')::uuid,
-				'date', localtimestamp(0)
-			)
+		update commons.counterparty_contracts SET
+			contract = _contract,
+			updated_date = localtimestamp(0)
 		where id = _id;
 	end if;
 
-	return json_build_object(
-		'msg', case when isUpdated then 'updated' else 'created' end,
+	return jsonb_build_object (
 		'status', 200,
+		'msg', case when _id is not null then 'updated' else 'created' end,
 		'id', _id
 	);
 end;
 $BODY$;
 
---------------------------------------------------------------------
+
+
+
+
+
+select commons.get_counterparty_contract(149)
+
+CREATE OR REPLACE FUNCTION commons.get_counterparty_contract(
+		_counterparty_id bigint
+	)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE
+	_result json;
+BEGIN
+
+	SELECT json_agg(row_to_json(ac))
+	into _result
+	FROM (
+		select 
+			id as key, 
+			id, 
+			contract, 
+			counterparty_id, 
+			created_date
+		from commons.counterparty_contracts
+		where counterparty_id = _counterparty_id
+	) ac;
+	
+	return _result;
+end;
+$BODY$;
+
+
+
+
