@@ -25,10 +25,15 @@ AS $BODY$
 		_contract_id bigint = (jdata->>'contract_id')::bigint;
 		_product jsonb;
 		isUpdate boolean = false;
+
+		/* table variables */
+		_id bigint;
 		_name_id bigint;
 		_unit_price numeric;
 		_quantity numeric;
-		_old_quantity numeric;
+		_ledger_id bigint;
+		_debit integer;
+		_credit integer;
 	BEGIN
 
 		/* VALIDATION START - STATUS CHECK */
@@ -87,11 +92,26 @@ AS $BODY$
 
 		-- loop
 		FOR _product IN SELECT * FROM json_array_elements(jdata->'products') LOOP
-		_name_id = (_product->>'name_id')::bigint;
-		_quantity = (_product->>'quantity')::numeric;
-		_unit_price = (_product->>'unit_price')::numeric;
+			_id = (_product->>'id')::bigint;
+			_name_id = (_product->>'name_id')::bigint;
+			_quantity = (_product->>'quantity')::numeric;
+			_unit_price = (_product->>'unit_price')::numeric;
+			_debit = (_product->>'debit')::int;
+			_credit = (_product->>'credit')::int;
+			_ledger_id = (_product->>'ledger_id')::int;
 
-			if (_product->>'id')::bigint is null then
+			if _id is null then
+				/* we fill ledger with the accountingentry */
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					_unit_price,
+					_contract_id,
+					null,
+					null
+				) INTO _ledger_id;
+
+				/* warehouse-incoming new insertion */
 				insert into accounting.warehouse_incoming (
 					doc_id,
 					counterparty_id, 
@@ -107,6 +127,7 @@ AS $BODY$
 					comment,
 					contract_id,
 					storage_location_id,
+					ledger_id,
 					created
 				) values (
 					_doc_id,
@@ -115,14 +136,15 @@ AS $BODY$
 					_name_id,
 					_quantity,
 					_unit_price,
-					(_product->>'debit')::int,
-					(_product->>'credit')::int,
+					_debit,
+					_credit,
 					(_product->>'vat')::numeric,
 					_unique_import_number,
 					_order_number,
 					_comment,
 					_contract_id,
 					1,
+					_ledger_id,
 					jsonb_build_object(
 						'user_id', _user_id,
 						'date', coalesce(created_date, LOCALTIMESTAMP(0))
@@ -131,7 +153,7 @@ AS $BODY$
 			else
 				/* update validations */
 				perform accounting.warehouse_incoming_update_validation(
-					(_product->>'id')::bigint,
+					_id,
 				    1,
 				    _name_id,
 				    _unique_import_number,
@@ -139,7 +161,23 @@ AS $BODY$
 				    _unit_price,
 				    _financing
 				);
+
+				/* we update ledger with new accouting entry */
+				if ((select debit from accounting.warehouse_incoming where id = _id) <> _debit) 
+					OR ((select credit from accounting.warehouse_incoming where id = _id) <> _credit)
+				THEN
+					SELECT accounting.upsert_ledger(
+						_debit,
+						_credit,
+						_unit_price,
+						_contract_id,
+						null,
+						_ledger_id
+					) INTO _ledger_id;
+				END IF;
 				
+
+				/* we update rows */
 				update accounting.warehouse_incoming wi SET
 					order_number = _order_number,
 					doc_id = _doc_id,
@@ -147,12 +185,13 @@ AS $BODY$
 					financing = _financing,
 					name_id = _name_id,
 					unit_price = _unit_price,
-					debit = (_product->>'debit')::int,
-					credit = (_product->>'credit')::int,
+					debit = debit,
+					credit = _credit,
 					vat = (_product->>'vat')::numeric,
 					quantity = _quantity,
 					comment = _comment,
 					contract_id = _contract_id,
+					ledger_id = _ledger_id,
 					created = CASE
     				    WHEN created_date IS NOT NULL
     				    THEN jsonb_set(
@@ -166,7 +205,7 @@ AS $BODY$
 						'user_id', _user_id,
 						'date', (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::timestamp(0)
 					)
-				where id = (_product->>'id')::bigint;
+				where id = _id;
 			end if;
     	END LOOP;
 
@@ -228,7 +267,8 @@ AS $BODY$
 	            	'quantity', wi.quantity,
 					'debit', wi.debit,
 					'credit', wi.credit,
-					'vat', wi.vat
+					'vat', wi.vat,
+					'ledger_id', wi.ledger_id
 	            ) ORDER BY wi.name_id
 	        ) AS products
 	    FROM accounting.warehouse_incoming wi
@@ -394,7 +434,8 @@ begin
 	            	'quantity', wi.quantity,
 					'debit', wi.debit,
 					'credit', wi.credit,
-					'vat', wi.vat
+					'vat', wi.vat,
+					'ledger_id', wi.ledger_id
 	            ) ORDER BY wi.name_id
 	        ) AS products
 	    FROM accounting.warehouse_incoming wi
