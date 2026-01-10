@@ -1,9 +1,9 @@
-select * from accounting.warehouse_incoming;
-
 
 
 select * from accounting.warehouse_total_routing;
 
+
+select * from accounting.warehouse_incoming order by id;
 
 
 CREATE OR REPLACE FUNCTION accounting.upsert_warehouse_incoming(
@@ -98,14 +98,14 @@ AS $BODY$
 			_unit_price = (_product->>'unit_price')::numeric;
 			_debit = (_product->>'debit')::int;
 			_credit = (_product->>'credit')::int;
-			_ledger_id = (_product->>'ledger_id')::int;
+			_ledger_id = (_product->>'ledger_id')::bigint;
 
 			if _id is null then
 				/* we fill ledger with the accountingentry */
 				SELECT accounting.upsert_ledger(
 					_debit,
 					_credit,
-					_unit_price,
+					round(_unit_price * _quantity, 2),
 					_contract_id,
 					null,
 					null
@@ -151,6 +151,7 @@ AS $BODY$
 					)
 				);
 			else
+				isUpdate = true;
 				/* update validations */
 				perform accounting.warehouse_incoming_update_validation(
 					_id,
@@ -163,20 +164,15 @@ AS $BODY$
 				);
 
 				/* we update ledger with new accouting entry */
-				if ((select debit from accounting.warehouse_incoming where id = _id) <> _debit) 
-					OR ((select credit from accounting.warehouse_incoming where id = _id) <> _credit)
-				THEN
-					SELECT accounting.upsert_ledger(
-						_debit,
-						_credit,
-						_unit_price,
-						_contract_id,
-						null,
-						_ledger_id
-					) INTO _ledger_id;
-				END IF;
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					round(_unit_price * _quantity, 2),
+					_contract_id,
+					null,
+					_ledger_id
+				) INTO _ledger_id;
 				
-
 				/* we update rows */
 				update accounting.warehouse_incoming wi SET
 					order_number = _order_number,
@@ -185,7 +181,7 @@ AS $BODY$
 					financing = _financing,
 					name_id = _name_id,
 					unit_price = _unit_price,
-					debit = debit,
+					debit = _debit,
 					credit = _credit,
 					vat = (_product->>'vat')::numeric,
 					quantity = _quantity,

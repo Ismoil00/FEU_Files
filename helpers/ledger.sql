@@ -17,7 +17,6 @@ create table if not exists accounting.ledger (
 
 
 
-
 select * from accounting.accounts
 
 
@@ -58,15 +57,15 @@ BEGIN
 		RAISE EXCEPTION 'Дебет и Кредит не могут быть одним и тем же бухгалтерским счетом.' USING ERRCODE = 'P0001';
 	end if;
 
-	-- making draft updated one
-	if _id is not null then 
+	-- we track history
+	if _id is not null then
 		update accounting.ledger set
 			draft = true,
 			updated_date = localtimestamp(0)
 		where id = _id;
 	end if;
 
-	-- new row
+	-- insert
 	insert into accounting.ledger (
 		debit,
 		credit,
@@ -88,7 +87,8 @@ end;
 $BODY$;
 
 
-
+SELECT * FROM auth.submodule
+where module_id = 1
 
 
 /*
@@ -96,13 +96,11 @@ $BODY$;
 		ищем кредитоские или дебиторские задолжности
 	-- ////////////////////////////////////// --
 */
-
-select * from accounting.ledger;
-
+select * from accounting.ledger ORDER BY id;
 
 
-select accounting.look_for_debts_in_ledger (17);
 
+select accounting.look_for_debts_in_ledger (18, null);
 
 
 
@@ -122,7 +120,7 @@ BEGIN
 	-- Кредиторская задолженность	Accounts payable      2.....
 
 	with debits as (
-		select sum(amount) as total_advances
+		select COALESCE(sum(amount), 0) as total_advances
 		from accounting.ledger l
 		where l.debit in (
 			125100,
@@ -135,7 +133,7 @@ BEGIN
 		and (_staff_id is null or _staff_id = staff_id)
 	),
 	credits as (
-		select sum(amount) as total_debts
+		select COALESCE(sum(amount), 0) as total_debts
 		from accounting.ledger l
 		where l.credit in (
 			211110,
@@ -149,9 +147,9 @@ BEGIN
 	select jsonb_build_object (
 		case 
 			when debits.total_advances - credits.total_debts > 0
-				then 'Дебиторская задолженность' 
+				then 'accounts_receivable' 
 			when debits.total_advances - credits.total_debts < 0
-				then 'Кредиторская задолженность'
+				then 'accounts_payable'
 			else 'nothing' end,
 		abs(debits.total_advances - credits.total_debts)
 	) into _result from debits, credits;
@@ -159,7 +157,6 @@ BEGIN
 	return _result;
 end;
 $BODY$;
-
 
 
 

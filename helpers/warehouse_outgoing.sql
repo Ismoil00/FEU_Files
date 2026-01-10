@@ -4,47 +4,6 @@ select * from accounting.warehouse_outgoing;
 select * from accounting.warehouse_total_routing;
 
 
-select accounting.upsert_warehouse_outgoing (
-	'
-	{
-		"routing": {
-			"warehouse_id":2,
-			"warehouse_section":"outgoing",
-			"jobposition_id":109,
-			"department_id":157,
-			"status":"approved",
-			"declined_text":""
-		},
-		"user_id": "98347360-c383-4979-9b21-c04d4808ce88",
-		"financing": "budget",
-		"products": [
-			{
-				"id":78,
-				"debit":111000,
-				"credit":54321,
-				"name_id":267,
-				"quantity":"15",
-				"import_id":1,
-				"unit_price":1000
-			}
-		],
-		"department_id": 1,
-		"storage_location_id": 3,
-		"staff_id": 3674,
-		"unique_outgoing_number": 2,
-		"order_number": 2,
-		"comment": "test3",
-		"created_date": "2025-12-10"
-	}
-	'
-);
-
-
-NOTICE:  _old_quantity 95.0
-NOTICE:  _quantity 15
-NOTICE:  difference -80.0
-NOTICE:  _storage_location_id 3
-
 
 CREATE OR REPLACE FUNCTION accounting.upsert_warehouse_outgoing(
 	jdata json)
@@ -67,6 +26,8 @@ AS $BODY$
 		_comment text = jdata->>'comment';
 		_storage_location_id bigint = (jdata->>'storage_location_id')::bigint;
 
+		/* table records */
+		_id bigint;
 		_product jsonb;
 		_quantity numeric;
 		_old_quantity numeric;
@@ -78,6 +39,9 @@ AS $BODY$
 		_name_id BIGINT;
 		_import_id BIGINT;
 		_unit_price NUMERIC;
+		_debit integer;
+		_credit integer;
+		_ledger_id bigint;
 	BEGIN
 
 		/* VALIDATION START - STATUS CHECK */
@@ -136,12 +100,16 @@ AS $BODY$
 
 		FOR _product IN SELECT * FROM json_array_elements(jdata->'products') LOOP
 			/* FETCHING VALUES FOR DRY */
+			_id = (_product->>'id')::bigint;
 			_quantity = (_product->>'quantity')::numeric;
 			_name_id = (_product->>'name_id')::bigint;
 			_import_id = (_product->>'import_id')::bigint;
 			_unit_price = (_product->>'unit_price')::numeric;
+			_debit = (_product->>'debit')::integer;
+			_credit = (_product->>'credit')::integer;
+			_ledger_id = (_product->>'ledger_id')::bigint;
 				
-			if (_product->>'id')::bigint is null then
+			if _id is null then
 				/* PRODUCT AMOUNT CHECK VALIDATION */
 				perform accounting.warehouse_product_amount_validation(
 					_storage_location_id,
@@ -151,6 +119,16 @@ AS $BODY$
 					_unit_price,
 					_financing
 				);
+
+				/* we fill ledger with the accountingentry */
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					round(_unit_price * _quantity, 2),
+					null,
+					null,
+					null
+				) INTO _ledger_id;
 
 				/* CURR-TABLE INSERTION */
 				insert into accounting.warehouse_outgoing (
@@ -171,6 +149,7 @@ AS $BODY$
 					import_id,
 					credit,
 					debit,
+					ledger_id,
 					created
 				) values (
 					_unique_outgoing_number,
@@ -188,8 +167,9 @@ AS $BODY$
 					_quantity,
 					_unit_price,
 					_import_id,
-					(_product->>'credit')::integer,
-					(_product->>'debit')::integer,
+					_credit,
+					_debit,
+					_ledger_id,
 					jsonb_build_object(
 						'user_id', jdata->>'user_id',
 						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
@@ -217,6 +197,16 @@ AS $BODY$
 					);
 				end if;
 
+				/* we update ledger with new accouting entry */
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					round(_unit_price * _quantity, 2),
+					null,
+					null,
+					_ledger_id
+				) INTO _ledger_id;
+
 				/* CURR-TABLE UPDATE */
 				update accounting.warehouse_outgoing wo SET
 					order_number = _order_number,
@@ -239,11 +229,12 @@ AS $BODY$
 					quantity = _quantity,
 					unit_price = _unit_price,
 					import_id = _import_id,
-					credit = (_product->>'credit')::integer,
-					debit = (_product->>'debit')::integer,
+					credit = _credit,
+					debit = _debit,
+					ledger_id = _ledger_id,
 					storage_location_id = _storage_location_id,
 					updated = _updated
-				where id = (_product->>'id')::bigint;
+				where id = _id;
 			end if;		
     	END LOOP;
 
@@ -343,6 +334,7 @@ AS $BODY$
 		                'name_id', wo.name_id,
 		                'quantity', wo.quantity,
 		                'unit_price', wo.unit_price,
+		                'ledger_id', wo.ledger_id,
 		                'debit', wo.debit,
 		                'credit', wo.credit
 		            ) ORDER BY wo.name_id
@@ -447,8 +439,6 @@ $BODY$;
 
 
 
-
-
 CREATE OR REPLACE FUNCTION accounting.get_warehouse_outgoing_by_unique_outgoing_number(
 	_unique_outgoing_number bigint,
 	_department_id integer)
@@ -488,6 +478,7 @@ AS $BODY$
 	                'name_id', wo.name_id,
 	                'quantity', wo.quantity,
 	                'unit_price', wo.unit_price,
+	                'ledger_id', wo.ledger_id,
 	                'debit', wo.debit,
 	                'credit', wo.credit
 	            ) ORDER BY wo.name_id
@@ -577,8 +568,6 @@ AS $BODY$
 		);
 	end;
 $BODY$;
-
-
 
 
 
