@@ -8,7 +8,6 @@ create table if not exists accounting.assets_recognition (
 	name_id bigint not null,
 	quantity numeric not null,
 	unit_price numeric not null,
-	credit integer not null,
 	import_id bigint not null,
 	inventory_number text,
 	department_id integer REFERENCES commons.department (id),
@@ -71,7 +70,6 @@ AS $BODY$
 			RAISE EXCEPTION 'Запись полностью одобрена, поэтому вы не можете ее редактировать. запросить одобрение редактирования' USING ERRCODE = 'P0001';
 		END IF;
 
-
 		/* GENERATING NEW UNIQUE-OUTGOING-NUMBER and ORDER-NUMBER for INSERTION */
 		if _operation_number is null then
 			SELECT coalesce(max(sub.operation_number), 0) + 1
@@ -113,7 +111,6 @@ AS $BODY$
 					unit_price,
 					import_id,
 					storage_location_id,
-					credit,
 					inventory_number,
 					department_id,
 					staff_id,
@@ -137,7 +134,6 @@ AS $BODY$
 					_unit_price,
 					_import_id,
 					_storage_location_id,
-					(_product->>'credit')::integer,
 					(_product->>'inventory_number')::text,
 					(_product->>'department_id')::integer,
 					(_product->>'staff_id')::bigint,
@@ -185,7 +181,6 @@ AS $BODY$
 					unit_price = _unit_price,
 					import_id = _import_id,
 					storage_location_id = _storage_location_id,
-					credit = (_product->>'credit')::integer,
 					inventory_number = (_product->>'inventory_number')::text,
 					department_id = (_product->>'department_id')::integer,
 					staff_id = (_product->>'staff_id')::bigint,
@@ -222,8 +217,6 @@ AS $BODY$
 		);
 	end;
 $BODY$;
-
-
 
 
 
@@ -290,7 +283,6 @@ AS $BODY$
 		                'quantity', quantity,
 		                'unit_price', unit_price,
 		                'import_id', import_id,
-		                'credit', credit,
 		                'inventory_number', inventory_number,
 		                'department_id', department_id,
 		                'staff_id', staff_id,
@@ -431,7 +423,6 @@ AS $BODY$
 		                'quantity', quantity,
 		                'unit_price', unit_price,
 		                'import_id', import_id,
-		                'credit', credit,
 		                'inventory_number', inventory_number,
 		                'department_id', department_id,
 		                'staff_id', staff_id,
@@ -530,7 +521,8 @@ $BODY$;
 
 
 
-CREATE OR REPLACE FUNCTION accounting.get_assets_recognition_id()
+CREATE OR REPLACE FUNCTION accounting.get_assets_recognition_id(
+	)
     RETURNS bigint
     LANGUAGE 'plpgsql'
     COST 100
@@ -590,8 +582,7 @@ begin
 			storage_location_id as to_storage_location_id,
 			null::bigint as from_storage_location_id,
 			sum(quantity) as quantity,
-			min((created->>'date')::date) as created_date,
-			min(credit) as credit
+			min((created->>'date')::date) as created_date
 		FROM accounting.warehouse_incoming
 		where name_id = _name_id
 		and financing = _financing
@@ -607,8 +598,7 @@ begin
 			to_storage_location_id,
 			from_storage_location_id,
 			quantity,
-			moved_at::date as created_date,
-			credit
+			moved_at::date as created_date
 		FROM accounting.product_transfer
 		WHERE name_id = _name_id
 		and financing = _financing
@@ -628,8 +618,7 @@ begin
 	        unit_price,
 	        to_storage_location_id AS location_id,
 	        SUM(quantity) AS quantity,
-			min(created_date) as created_date,
-			min(credit) as credit
+			min(created_date) as created_date
 	    FROM all_warehouses
 	    GROUP BY name_id, import_id, unit_price, to_storage_location_id
 	),
@@ -653,8 +642,7 @@ begin
 	        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
 	        COALESCE(mi.location_id, mo.location_id) AS location_id,
 	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
-			mi.created_date,
-			mi.credit
+			mi.created_date
 	    FROM movement_incoming mi
 	    FULL JOIN movement_outgoing mo
 	    ON mi.name_id = mo.name_id
@@ -711,7 +699,6 @@ begin
 		    'unit_price', mc.unit_price,
 		    'storage_location_id', mc.location_id,
 		    'left_quantity', COALESCE(mc.quantity, 0) - COALESCE(we.quantity, 0),
-		    'credit', mc.credit,
 		    'created_date', mc.created_date
 		) as aggregated 
 		from movement_combined mc
@@ -770,9 +757,7 @@ BEGIN
 			unit_price,
 			storage_location_id as to_storage_location_id,
 			null::bigint as from_storage_location_id,
-			sum(quantity) as quantity,
-			min((created->>'date')::date) as created_date,
-			min(credit) as credit
+			sum(quantity) as quantity
 		FROM accounting.warehouse_incoming
 		where name_id = _name_id
 		and unique_import_number = _import_id
@@ -789,9 +774,7 @@ BEGIN
 	        unit_price,
 			to_storage_location_id,
 			from_storage_location_id,
-			quantity,
-			moved_at::date as created_date,
-			credit
+			quantity
 		FROM accounting.product_transfer
 		where name_id = _name_id
 		and import_id = _import_id
@@ -812,9 +795,7 @@ BEGIN
 	        import_id,
 	        unit_price,
 	        to_storage_location_id AS location_id,
-	        SUM(quantity) AS quantity,
-			min(created_date) as created_date,
-			min(credit) as credit
+	        SUM(quantity) AS quantity
 	    FROM all_warehouses
 	    GROUP BY name_id, import_id, unit_price, to_storage_location_id
 	),
@@ -837,9 +818,7 @@ BEGIN
 	        COALESCE(mi.import_id, mo.import_id) AS import_id,
 	        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
 	        COALESCE(mi.location_id, mo.location_id) AS location_id,
-	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
-			mi.created_date,
-			mi.credit
+	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity
 	    FROM movement_incoming mi
 	    FULL JOIN movement_outgoing mo
 	    ON mi.name_id = mo.name_id

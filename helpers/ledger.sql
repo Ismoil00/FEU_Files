@@ -53,9 +53,9 @@ DECLARE
 BEGIN
 
 	-- debit must not = credit
-	if _debit = _credit then
-		RAISE EXCEPTION 'Дебет и Кредит не могут быть одним и тем же бухгалтерским счетом.' USING ERRCODE = 'P0001';
-	end if;
+	-- if _debit = _credit then
+	-- 	RAISE EXCEPTION 'Дебет и Кредит не могут быть одним и тем же бухгалтерским счетом.' USING ERRCODE = 'P0001';
+	-- end if;
 
 	-- we track history
 	if _id is not null then

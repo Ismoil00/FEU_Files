@@ -1,6 +1,15 @@
 
 
 
+select * from accounting.product_transfer;
+
+
+select * from accounting.ledger;
+
+
+select * from accounting.warehouse_total_routing
+
+
 CREATE OR REPLACE FUNCTION accounting.upsert_product_transfer(
 	jdata json)
     RETURNS json
@@ -18,8 +27,18 @@ AS $BODY$
 		_from_storage_location_id bigint = (jdata->>'from_storage_location_id')::bigint;
 		_to_storage_location_id bigint = (jdata->>'to_storage_location_id')::bigint;
 		_main_department_id int = (jdata->>'main_department_id')::int;
-		_comment text = (jdata->>'comment')::text;
+		_comment text = jdata->>'comment';
+
+		/* table variables */
 		_product jsonb;
+		_id bigint;
+		_name_id bigint;
+		_import_id bigint;
+		_quantity numeric;
+		_unit_price numeric;
+		_debit integer;
+		_credit integer;
+		_ledger_id bigint;
 	BEGIN
 
 		/* VALIDATION START - STATUS CHECK */
@@ -30,7 +49,6 @@ AS $BODY$
 		) THEN
 			RAISE EXCEPTION 'Запись полностью одобрена, поэтому вы не можете ее редактировать. запросить одобрение редактирования' USING ERRCODE = 'P0001';
 		END IF;
-
 
 		/* GENERATING NEW UNIQUE-OUTGOING-NUMBER and ORDER-NUMBER for INSERTION */
 		if _transfer_number is null then
@@ -46,16 +64,37 @@ AS $BODY$
 
 		/* UPSERT */
 		FOR _product IN SELECT * FROM jsonb_array_elements((jdata->>'table_data')::jsonb) LOOP
-			if (_product->>'id')::bigint is null then
+				_id = (_product->>'id')::bigint;
+				_name_id = (_product->>'name_id')::bigint;
+				_import_id = (_product->>'import_id')::bigint;
+				_quantity = (_product->>'quantity')::numeric;
+				_unit_price = (_product->>'unit_price')::numeric;
+				_debit = (_product->>'debit')::integer;
+				_credit = (_product->>'credit')::integer;
+
+			-- insertion
+			if _id is null then
+				/* we validate the required quantity to transfer */
 				perform accounting.warehouse_product_amount_validation(
 				   _from_storage_location_id,
-				   (_product->>'name_id')::bigint,
-				   (_product->>'import_id')::bigint,
-				   (_product->>'quantity')::numeric,
-				   (_product->>'unit_price')::numeric,
+				   _name_id,
+				   _import_id,
+				   _quantity,
+				   _unit_price,
 				   _financing
 				);
-			
+
+				/* we fill ledger with the accounting entry */
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					round(_unit_price * _quantity, 2),
+					null,
+					null,
+					null
+				) INTO _ledger_id;
+
+				-- insertion
 				insert into accounting.product_transfer (
 					transfer_number,
 					from_storage_location_id,
@@ -72,6 +111,7 @@ AS $BODY$
 					quantity,
 					unit_price,
 					import_id,
+					ledger_id,
 					
 					created
 				) values (
@@ -84,18 +124,21 @@ AS $BODY$
 					_financing,
 					
 					/* table data */
-					(_product->>'debit')::int,
-					(_product->>'credit')::int,
-					(_product->>'name_id')::bigint,
-					(_product->>'quantity')::numeric,
-					(_product->>'unit_price')::numeric,
-					(_product->>'import_id')::bigint,
+					_debit,
+					_credit,
+					_name_id,
+					_quantity,
+					_unit_price,
+					_import_id,
+					_ledger_id,
 					
 					jsonb_build_object(
 						'user_id', _user_id,
 						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
 					)
 				);
+
+			-- update
 			else
 				isUpdate = true;
 				update accounting.product_transfer ie SET				
@@ -106,12 +149,13 @@ AS $BODY$
 					financing = _financing,
 					
 					/* table data */
-					-- debit = (_product->>'debit')::int,
-					-- credit = (_product->>'credit')::int,
-					-- name_id = (_product->>'name_id')::bigint,
-					-- quantity = (_product->>'quantity')::numeric,
-					-- unit_price = (_product->>'unit_price')::numeric,
-					-- import_id = (_product->>'import_id')::bigint,
+					-- debit = _debit,
+					-- credit = _credit,
+					-- name_id = _name_id,
+					-- quantity = _quantity,
+					-- unit_price = _unit_price,
+					-- import_id = _import_id,
+					-- ledger_id = _ledger_id,
 					
 					created = CASE
 	    			    WHEN _created_date IS NOT NULL
@@ -126,7 +170,7 @@ AS $BODY$
 						'user_id', _user_id,
 						'date', LOCALTIMESTAMP(0)
 					)
-				where id = (_product->>'id')::bigint;
+				where id = _id;
 			end if;
 		END LOOP;
 
@@ -209,6 +253,7 @@ AS $BODY$
 		                'name_id', name_id,
 		                'quantity',quantity,
 		                'unit_price', unit_price,
+		                'ledger_id', ledger_id,
 		                'debit', debit,
 		                'credit', credit
 		            ) ORDER BY name_id
@@ -346,6 +391,7 @@ AS $BODY$
 		                'name_id', name_id,
 		                'quantity',quantity,
 		                'unit_price', unit_price,
+		                'ledger_id', ledger_id,
 		                'debit', debit,
 		                'credit', credit
 		            ) ORDER BY name_id
@@ -440,7 +486,8 @@ $BODY$;
 
 
 
-CREATE OR REPLACE FUNCTION accounting.get_product_transfer_id()
+CREATE OR REPLACE FUNCTION accounting.get_product_transfer_id(
+	)
     RETURNS bigint
     LANGUAGE 'plpgsql'
     COST 100
@@ -500,16 +547,17 @@ select * from accounting.goods_return;
 
 
 CREATE OR REPLACE FUNCTION accounting.warehouse_product_amount_validation(
-    _location_id bigint,
-    _name_id bigint,
-    _import_id bigint,
-    _amount numeric,
-    _unit_price numeric,
-    _financing accounting.budget_distribution_type
-)
-RETURNS void
-LANGUAGE plpgsql
-AS $$
+	_location_id bigint,
+	_name_id bigint,
+	_import_id bigint,
+	_amount numeric,
+	_unit_price numeric,
+	_financing accounting.budget_distribution_type)
+    RETURNS void
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
 DECLARE
     _left_quantity numeric;
     product_name text;
@@ -523,9 +571,7 @@ BEGIN
 			unit_price,
 			storage_location_id as to_storage_location_id,
 			null::bigint as from_storage_location_id,
-			sum(quantity) as quantity,
-			min((created->>'date')::date) as created_date,
-			min(credit) as credit
+			sum(quantity) as quantity
 		FROM accounting.warehouse_incoming
 		where name_id = _name_id
 		and unique_import_number = _import_id
@@ -542,9 +588,7 @@ BEGIN
 	        unit_price,
 			to_storage_location_id,
 			from_storage_location_id,
-			quantity,
-			moved_at::date as created_date,
-			credit
+			quantity
 		FROM accounting.product_transfer
 		where name_id = _name_id
 		and import_id = _import_id
@@ -565,9 +609,7 @@ BEGIN
 	        import_id,
 	        unit_price,
 	        to_storage_location_id AS location_id,
-	        SUM(quantity) AS quantity,
-			min(created_date) as created_date,
-			min(credit) as credit
+	        SUM(quantity) AS quantity
 	    FROM all_warehouses
 	    GROUP BY name_id, import_id, unit_price, to_storage_location_id
 	),
@@ -590,9 +632,7 @@ BEGIN
 	        COALESCE(mi.import_id, mo.import_id) AS import_id,
 	        COALESCE(mi.unit_price, mo.unit_price) AS unit_price,
 	        COALESCE(mi.location_id, mo.location_id) AS location_id,
-	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity,
-			mi.created_date,
-			mi.credit
+	        COALESCE(mi.quantity, 0) - COALESCE(mo.quantity, 0) quantity
 	    FROM movement_incoming mi
 	    FULL JOIN movement_outgoing mo
 	    ON mi.name_id = mo.name_id
@@ -637,7 +677,6 @@ BEGIN
         _left_quantity := 0;
     END IF;
 
-
     -- Actual validation
     IF _left_quantity < _amount THEN
 
@@ -652,4 +691,4 @@ BEGIN
     END IF;
 
 END;
-$$;
+$BODY$;

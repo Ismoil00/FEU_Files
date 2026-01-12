@@ -33,6 +33,8 @@ select * from accounting.ledger;
 
 select * from accounting.warehouse_total_routing;
 
+
+
 CREATE OR REPLACE FUNCTION accounting.upsert_warehouse_services(jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
@@ -91,7 +93,7 @@ AS $BODY$
 			_ledger_id = (_product->>'ledger_id')::bigint;
 
 			if _id is null then
-				/* we fill ledger with the accountingentry */
+				/* we fill ledger with the accounting entry */
 				SELECT accounting.upsert_ledger(
 					_debit,
 					_credit,

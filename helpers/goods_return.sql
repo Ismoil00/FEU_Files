@@ -3,7 +3,14 @@
 select * from accounting.goods_return;
 
 
-CREATE OR REPLACE FUNCTION accounting.upsert_goods_return(jdata json)
+select * from accounting.warehouse_incoming
+where name_id = 77;
+
+select * from accounting.ledger order by id
+
+
+CREATE OR REPLACE FUNCTION accounting.upsert_goods_return(
+	jdata json)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
@@ -15,6 +22,7 @@ AS $BODY$
 		_id bigint = (jdata->>'id')::bigint;
 		_financing accounting.budget_distribution_type = 
 			(jdata->>'financing')::accounting.budget_distribution_type;
+		_contract_id bigint = (jdata->>'contract_id')::bigint;
 		_table_data jsonb;
 	BEGIN
 
@@ -32,6 +40,7 @@ AS $BODY$
     	  _user_id,
     	  (jdata->>'table_data')::jsonb,
 		  _financing,
+		  _contract_id,
     	  _id
     	) INTO _table_data;
 
@@ -40,7 +49,7 @@ AS $BODY$
 			insert into accounting.goods_return (
 				main_department_id,
 				counterparty_id,
-				contract,
+				contract_id,
 				storage_location_id,
 				comment,
 				financing,
@@ -49,10 +58,10 @@ AS $BODY$
 			) values (
 				(jdata->>'main_department_id')::integer,
 				(jdata->>'counterparty_id')::bigint,
-				(jdata->>'contract')::text,
+				_contract_id,
 				1,
 				-- (jdata->>'storage_location_id')::bigint,
-				(jdata->>'comment')::text,
+				jdata->>'comment',
 				_financing,
 				_table_data,
 				jsonb_build_object(
@@ -64,9 +73,9 @@ AS $BODY$
 			update accounting.goods_return gr SET
 				main_department_id  = (jdata->>'main_department_id')::integer,
 				counterparty_id = (jdata->>'counterparty_id')::bigint,
-				contract = (jdata->>'contract')::text,
+				contract_id = _contract_id,
 				-- storage_location_id = (jdata->>'storage_location_id')::bigint,
-				comment = (jdata->>'comment')::text,
+				comment = jdata->>'comment',
 				financing = _financing,
 				table_data = _table_data,
 				created = CASE
@@ -138,7 +147,7 @@ AS $BODY$
 				id,
 				main_department_id,
 				counterparty_id,
-				contract,
+				contract_id,
 				-- storage_location_id,
 				comment,
 				financing,
@@ -206,7 +215,7 @@ AS $BODY$
 				'id', m.id,
 				'main_department_id', m.main_department_id,
 				'counterparty_id', m.counterparty_id,
-				'contract', m.contract,
+				'contract_id', m.contract_id,
 				-- 'storage_location_id', m.storage_location_id,
 				'comment', m.comment,
 				'financing', financing,
@@ -252,7 +261,7 @@ AS $BODY$
 				id,
 				main_department_id,
 				counterparty_id,
-				contract,
+				contract_id,
 				-- storage_location_id,
 				comment,
 				financing,
@@ -313,7 +322,7 @@ AS $BODY$
 			'id', m.id,
 			'main_department_id', m.main_department_id,
 			'counterparty_id', m.counterparty_id,
-			'contract', m.contract,
+			'contract_id', m.contract_id,
 			-- 'storage_location_id', m.storage_location_id,
 			'comment', m.comment,
 			'financing', financing,
@@ -332,7 +341,6 @@ AS $BODY$
 		);
 	end;
 $BODY$;
-
 
 
 
@@ -365,27 +373,31 @@ $BODY$;
 
 
 
+
 select * from accounting.warehouse_total_routing
 
-select * from accounting.warehouse_outgoing;
 
 select * from accounting.goods_return;
 
-select * from accounting.warehouse_incoming;
+
+select * from accounting.warehouse_incoming
+where name_id = 22;
+
+select * from accounting.ledger order by id
 
 
-
-create or replace function accounting.goods_return_table_data_validation(
+CREATE OR REPLACE FUNCTION accounting.goods_return_table_data_validation(
 	_user_id text,
 	_table_data jsonb,
 	_financing accounting.budget_distribution_type,
-	row_id bigint default null::bigint
+	_contract_id bigint,
+	row_id bigint DEFAULT NULL::bigint
 )
-returns jsonb
-language 'plpgsql'
-cost 100
-volatile parallel unsafe
-as $BODY$
+    RETURNS jsonb
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
 DECLARE
 	_row jsonb;
 	_old_table_data jsonb;
@@ -396,6 +408,10 @@ DECLARE
 	_name_id bigint;
 	_import_id bigint;
 	_price numeric;
+	_wquantity numeric;
+	_credit integer;
+	_debit integer;
+	_ledger_id bigint;
 	_updated jsonb = jsonb_build_object(
 	  'user_id', _user_id,
 	  'date', LOCALTIMESTAMP(0)
@@ -416,6 +432,15 @@ BEGIN
 		_import_id = (_row->>'import_id')::bigint;
 		_price = (_row->>'price')::numeric;
 		_new_quantity = (_row->>'quantity')::numeric;
+		_credit = (_row->>'credit')::integer;
+		_debit = (_row->>'debit')::integer;
+		_ledger_id = (_row->>'ledger_id')::bigint;
+		-- we get warehouse old quantity for ledger
+		select quantity into _wquantity
+		from accounting.warehouse_incoming
+		where unique_import_number = _import_id
+		and name_id = _name_id
+		and unit_price = _price;
 
         IF (_row->>'minused')::boolean is not true OR row_id IS NULL THEN
             -- Validate the quantity
@@ -428,9 +453,20 @@ BEGIN
 				_financing
 			);
 
-            -- we update the warehouse [incoming, outgoing] tables
-            update accounting.warehouse_incoming wi set 
-            	quantity = wi.quantity - _new_quantity,
+			-- ledger tracking
+			SELECT accounting.upsert_ledger(
+				_debit,
+				_credit,
+				round(_price * (_wquantity - _new_quantity), 2),
+				_contract_id,
+				null,
+				_ledger_id
+			) INTO _ledger_id;
+
+            -- we update the warehouse [incoming] tables
+            update accounting.warehouse_incoming set 
+            	quantity = _wquantity - _new_quantity,
+				ledger_id = _ledger_id,
               	updated = _updated
             where unique_import_number = _import_id
             and name_id = _name_id
@@ -438,7 +474,7 @@ BEGIN
 
             -- minused = true + updated table_data
 			_updated_table_data = _updated_table_data || jsonb_build_array(
-				_row || jsonb_build_object('minused', true)
+				_row || jsonb_build_object('minused', true, 'ledger_id', _ledger_id)
 			);
 		ELSE
             -- This is an old row - find it in old_table_data by id or key
@@ -465,19 +501,41 @@ BEGIN
 					_price,
 					_financing
 				);
+
+				-- ledger tracking
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					round(_price * (_wquantity - _quantity_diff), 2),
+					_contract_id,
+					null,
+					_ledger_id
+				) INTO _ledger_id;
   
-              	-- we update the warehouse [incoming, outgoing] tables
-              	update accounting.warehouse_incoming wi set 
-              	  	quantity = wi.quantity - _quantity_diff,
+              	-- we update the warehouse incoming table
+              	update accounting.warehouse_incoming set 
+              	  	quantity = _wquantity - _quantity_diff,
+					ledger_id = _ledger_id,
               	  	updated = _updated
               	where unique_import_number = _import_id
               	and name_id = _name_id
               	and unit_price = _price;
   
 			ELSIF _quantity_diff < 0 THEN
-				-- we update the warehouse [incoming, outgoing] tables
-				update accounting.warehouse_incoming wi set 
-				  	quantity = wi.quantity + abs(_quantity_diff),
+				-- ledger tracking
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					round(_price * (_wquantity + abs(_quantity_diff)), 2),
+					_contract_id,
+					null,
+					_ledger_id
+				) INTO _ledger_id;
+				
+				-- we update the warehouse incoming table
+				update accounting.warehouse_incoming set 
+				  	quantity = _wquantity + abs(_quantity_diff),
+					ledger_id = _ledger_id,
 				  	updated = _updated
 				where unique_import_number = _import_id
 				and name_id = _name_id
@@ -487,7 +545,7 @@ BEGIN
   
 			-- minused = true + updated table_data
 			_updated_table_data = _updated_table_data || jsonb_build_array(
-				_row || jsonb_build_object('minused', true)
+				_row || jsonb_build_object('minused', true, 'ledger_id', _ledger_id)
 			);
 		END IF;
 	END LOOP;

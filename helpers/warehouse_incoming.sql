@@ -6,6 +6,9 @@ select * from accounting.warehouse_total_routing;
 select * from accounting.warehouse_incoming order by id;
 
 
+select * from accounting.ledger order by id;
+
+
 CREATE OR REPLACE FUNCTION accounting.upsert_warehouse_incoming(
 	jdata json)
     RETURNS json

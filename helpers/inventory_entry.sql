@@ -5,6 +5,9 @@ select * from accounting.inventory_entry;
 select * from accounting.warehouse_total_routing
 
 
+select * from accounting.ledger;
+
+
 CREATE OR REPLACE FUNCTION accounting.upsert_inventory_entry(
 	jdata json)
     RETURNS json
@@ -359,99 +362,13 @@ $BODY$;
 
 
 
-CREATE OR REPLACE FUNCTION accounting.get_warehouse_incomings_for_entry(
-	_name_id bigint,
-	_financing accounting.budget_distribution_type
-)
-    RETURNS jsonb
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-declare
-	_result jsonb;
-begin
-
-	with imports as (
-		SELECT 
-			unique_import_number as import_id,
-			name_id,
-			financing,
-			order_number,
-			unit_price,
-			sum(quantity) quantity,
-			min((created->>'date')::date) created_date,
-			min(credit) credit
-		FROM accounting.warehouse_incoming
-		where name_id = _name_id
-		and financing = _financing
-		and status = 'approved'
-		group by name_id, financing, unique_import_number,
-		order_number, unit_price
-	),
-	exports as (
-		select 
-			import_id,
-			name_id,
-			financing,
-			unit_price,
-			sum(quantity) quantity
-		from accounting.warehouse_outgoing
-		where name_id = _name_id
-		and financing = _financing
-		-- and status = 'approved'
-		group by name_id, financing, import_id, unit_price
-	),
-	joining as (
-		select
-			ROW_NUMBER() OVER (ORDER BY i.order_number, i.created_date) AS key,
-			i.import_id,
-			coalesce(i.quantity, 0) - COALESCE(e.quantity, 0) as left_quantity,
-			coalesce(i.unit_price, 0) as unit_price,
-			i.order_number,
-			i.credit,
-			i.created_date
-		from imports i
-		left join exports e
-		on i.import_id = e.import_id
-			and i.name_id = e.name_id 
-			and i.financing = e.financing
-			and i.unit_price = e.unit_price
-		 ORDER BY i.order_number, i.created_date
-	),
-	finalCTE AS (
-	    SELECT jsonb_agg(
-	        jsonb_build_object(
-	            'key', j.key,
-	            'import_id', j.import_id,
-	            'left_quantity', j.left_quantity,
-	            'unit_price', j.unit_price,
-	            'order_number', j.order_number,
-	            'credit', j.credit,
-	            'created_date', j.created_date
-	        )
-	    ) AS aggregated
-	    FROM joining j
-	)
-	SELECT f.aggregated 
-	FROM finalCTE f 
-	INTO _result;
-
-	return json_build_object(
-		'status', 200,
-		'results', _result
-	);
-end;
-$BODY$;
 
 
+select * from accounting.warehouse_incoming
+where name_id = 77;
 
-"invalid input syntax for type bigint: "unique_import_number""
+select * from accounting.ledger order by id
 
-
-
-
-select * from accounting.warehouse_incoming;
 
 select * from accounting.warehouse_total_routing
 
@@ -460,19 +377,18 @@ select * from accounting.warehouse_outgoing;
 select * from accounting.inventory_entry;
 
 
-create or replace function accounting.inventory_entry_table_data_management(
+CREATE OR REPLACE FUNCTION accounting.inventory_entry_table_data_management(
 	_user_id text,
 	_table_data jsonb,
 	_financing accounting.budget_distribution_type,
 	_created_date date,
 	_routing jsonb,
-	row_id bigint default null::bigint
-)
-returns jsonb
-language 'plpgsql'
-cost 100
-volatile parallel unsafe
-as $BODY$
+	row_id bigint DEFAULT NULL::bigint)
+    RETURNS jsonb
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
 DECLARE
 	_row jsonb;
 	_old_table_data jsonb;
@@ -483,7 +399,10 @@ DECLARE
 	_name_id bigint;
 	_import_id bigint;
 	_unit_price numeric;
+	_wquantity numeric;
 	_credit integer;
+	_debit integer;
+	_ledger_id bigint;
 	_updated jsonb = jsonb_build_object(
 	  'user_id', _user_id,
 	  'date', LOCALTIMESTAMP(0)
@@ -519,7 +438,13 @@ BEGIN
 		_unit_price = (_row->>'unit_price')::numeric;
 		_new_quantity = (_row->>'quantity')::numeric;
 		_credit = (_row->>'credit')::integer;
+		_debit = (_row->>'debit')::integer;
+		_ledger_id = (_row->>'ledger_id')::bigint;
 
+		/* 
+			if a product does not exist in the warehouse at all
+			and was found as the result of the inventory
+		*/
 		IF _import_id is null then
 			select accounting.upsert_warehouse_incoming(
 				json_build_object(
@@ -531,7 +456,8 @@ BEGIN
 							'name_id', _name_id,
 							'unit_price', _unit_price,
 							'quantity', _new_quantity,
-							'credit', _credit
+							'credit', _credit,
+							'debit', _debit
 						)
 					),
 					'routing', jsonb_build_object(
@@ -540,21 +466,42 @@ BEGIN
 						'department_id', _routing->>'department_id',
 						'status', 'approved'
 					)
-					-- 'unique_import_number', NULL
 				)
 			) INTO _upsert_result;
 
 			-- minused = true + updated table_data
 			_updated_table_data = _updated_table_data || jsonb_build_array(
 				_row || jsonb_build_object(
-					'minused', true, 
+					'minused', true,
 					'import_id', (_upsert_result->>'unique_import_number')::bigint
 				)
 			);
+
+		/* 
+			if a product was found more then was really exists in the warehouse
+		*/
         ELSIF (_row->>'minused')::boolean is not true OR row_id IS NULL THEN
+			-- we get warehouse old quantity for ledger
+			select quantity into _wquantity
+			from accounting.warehouse_incoming
+			where unique_import_number = _import_id
+            and name_id = _name_id
+            and unit_price = _unit_price;
+			
+			-- ledger tracking
+			SELECT accounting.upsert_ledger(
+				_debit,
+				_credit,
+				round(_unit_price * (_wquantity + _new_quantity), 2),
+				null,
+				null,
+				_ledger_id
+			) INTO _ledger_id;
+		
             -- we update the warehouse incoming tables
-            update accounting.warehouse_incoming wi set 
-            	quantity = wi.quantity + _new_quantity,
+            update accounting.warehouse_incoming set 
+            	quantity = _wquantity + _new_quantity,
+				ledger_id = _ledger_id,
               	updated = _updated
             where unique_import_number = _import_id
             and name_id = _name_id
@@ -562,8 +509,12 @@ BEGIN
 
             -- minused = true + updated table_data
 			_updated_table_data = _updated_table_data || jsonb_build_array(
-				_row || jsonb_build_object('minused', true)
+				_row || jsonb_build_object('minused', true, 'ledger_id', _ledger_id)
 			);
+
+		/* 
+			if the user changes the inventory entry record
+		*/
 		ELSIF (_row->>'minused')::boolean is true AND row_id IS NOT NULL THEN
             -- This is an old row - find it in old_table_data by id or key
 			SELECT jsonb_array_elements.value 
@@ -586,15 +537,35 @@ BEGIN
 					_name_id,
 					_import_id,
 					abs(_quantity_diff),
-					_price,
+					_unit_price,
 					_financing
 				);
 			end if;
 
+
+			-- we update the warehouse incoming tables
 			if _quantity_diff <> 0 then
-				-- we update the warehouse incoming tables
+				-- we get warehouse old quantity for ledger
+				select quantity into _wquantity
+				from accounting.warehouse_incoming
+				where unique_import_number = _import_id
+	            and name_id = _name_id
+	            and unit_price = _unit_price;
+				
+				-- ledger tracking
+				SELECT accounting.upsert_ledger(
+					_debit,
+					_credit,
+					round(_unit_price * (_wquantity + _quantity_diff), 2),
+					null,
+					null,
+					_ledger_id
+				) INTO _ledger_id;
+
+				-- update
 				update accounting.warehouse_incoming wi set 
 				  	quantity = wi.quantity + _quantity_diff,
+					ledger_id = _ledger_id,
 				  	updated = _updated
 				where unique_import_number = _import_id
 				and name_id = _name_id
@@ -603,7 +574,7 @@ BEGIN
 			
 			-- minused = true + updated table_data
 			_updated_table_data = _updated_table_data || jsonb_build_array(
-				_row || jsonb_build_object('minused', true)
+				_row || jsonb_build_object('minused', true, 'ledger_id', _ledger_id)
 			);
 		ELSE
             -- fallback - shouldn't happen but we keep row unchanged
