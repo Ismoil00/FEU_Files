@@ -1,6 +1,137 @@
 
 
 
+select * from accounting.cash_receipt_order
+where id = 2008;
+
+
+select * from accounting.ledger 
+where id > 110
+order by id;
+
+
+
+CREATE OR REPLACE FUNCTION accounting.upsert_cash_receipt_order(
+	jdata json)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE
+		_user_id text = jdata->>'user_id';
+		_created_date date = (jdata->>'created_date')::date;
+		_id bigint = (jdata->>'id')::bigint;
+		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
+		_credit integer = (jdata->>'credit')::integer;
+		_amount numeric = (jdata->>'amount')::numeric;
+		_contract_id bigint = (jdata->>'contract_id')::bigint;
+		_ledger_id bigint = (jdata->>'ledger_id')::bigint;
+		_staff_id bigint = (jdata->>'staff_id')::bigint;
+	BEGIN
+
+		/* we fill ledger with the accountingentry */
+		SELECT accounting.upsert_ledger(
+			111110,
+			_credit,
+			_amount,
+			_contract_id,
+			_staff_id,
+			_ledger_id
+		) INTO _ledger_id;
+
+		-- insertion
+		if _id is null then
+			insert into accounting.cash_receipt_order (
+				financing,
+				cash_flow_article_id,
+				amount,
+				credit,
+				description,
+				based_on,
+				
+				received_from,
+				staff_id,
+				department_id,
+				staff_id_document,
+				counterparty_id,
+				contract_id,
+				contract_text,
+				ledger_id,
+				
+				created
+			) values (
+				_financing,
+				(jdata->>'cash_flow_article_id')::bigint,
+				_amount,
+				_credit,
+				jdata->>'description',
+				jdata->>'based_on',
+				
+				jdata->>'received_from',
+				_staff_id,
+				(jdata->>'department_id')::bigint,
+				jdata->>'staff_id_document',
+				(jdata->>'counterparty_id')::bigint,
+				_contract_id,
+				jdata->>'contract_text',
+				_ledger_id,
+				
+				jsonb_build_object(
+					'user_id', _user_id,
+					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
+				)
+			) returning id into _id;
+			
+		-- update
+		else
+			update accounting.cash_receipt_order cro SET
+				financing = _financing,
+				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
+				amount = _amount,
+				credit = _credit,
+				description = jdata->>'description',
+				based_on = jdata->>'based_on',
+				
+				received_from = jdata->>'received_from',
+				staff_id = _staff_id,
+				department_id = (jdata->>'department_id')::bigint,
+				staff_id_document = jdata->>'staff_id_document',
+				counterparty_id = (jdata->>'counterparty_id')::bigint,
+				contract_id = _contract_id,
+				contract_text = jdata->>'contract_text',
+				ledger_id = _ledger_id,
+				
+				created = CASE
+    			    WHEN _created_date IS NOT NULL
+    			    THEN jsonb_set(
+    			             cro.created,
+    			             '{date}',
+    			             to_jsonb(_created_date)
+    			         )
+    			    ELSE cro.created
+    			END,
+				updated = jsonb_build_object(
+					'user_id', _user_id,
+					'date', LOCALTIMESTAMP(0)
+				)
+			where id = _id;
+		end if;
+
+		return json_build_object(
+			'msg', case when _id is null then 'created' else 'updated' end,
+			'status', 200,
+			'id', _id
+		);
+	end;
+$BODY$;
+
+
+
+
+
+
+
 select * from accounting.cash_receipt_order;
 
 
@@ -16,7 +147,7 @@ select * from accounting.cash_receipt_order;
 		);
 
 
-CREATE OR REPLACE FUNCTION accounting.get_cash_receipt_order (
+CREATE OR REPLACE FUNCTION accounting.get_cash_receipt_order(
 	_financing accounting.budget_distribution_type,
 	_id bigint DEFAULT NULL::bigint,
 	_date_from text DEFAULT NULL::text,
@@ -55,16 +186,18 @@ AS $BODY$
 				'cash_flow_article_id', cash_flow_article_id,
 				'amount', amount,
 				'credit', credit,
-				'advance_credit', advance_credit,
 				'description', description,
 				'based_on', based_on,
 				'created_date', (created->>'date')::date,
 				
 				'received_from', received_from,
+				'ledger_id', ledger_id,
+				'department_id', department_id,
 				'staff_id', staff_id,
 				'staff_id_document', staff_id_document,
 				'counterparty_id', counterparty_id,
-				'contract', contract
+				'contract_id', contract_id,
+				'contract_text', contract_text
 			) aggregated
 			from main
 			order by id limit _limit offset _offset
@@ -81,102 +214,14 @@ $BODY$;
 
 
 
--- select * from accounting.cash_receipt_order
 
 
 
-CREATE OR REPLACE FUNCTION accounting.upsert_cash_receipt_order(
-	jdata json)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_user_id text = jdata->>'user_id';
-		_created_date date = (jdata->>'created_date')::date;
-		_id bigint = (jdata->>'id')::bigint;
-		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
-	BEGIN
 
-		if _id is null then
-			insert into accounting.cash_receipt_order (
-				financing,
-				cash_flow_article_id,
-				amount,
-				credit,
-				advance_credit,
-				description,
-				based_on,
-				
-				received_from,
-				staff_id,
-				staff_id_document,
-				counterparty_id,
-				contract,
-				
-				created
-			) values (
-				_financing,
-				(jdata->>'cash_flow_article_id')::bigint,
-				(jdata->>'amount')::numeric,
-				(jdata->>'credit')::integer,
-				(jdata->>'advance_credit')::integer,
-				(jdata->>'description')::text,
-				(jdata->>'based_on')::text,
-				
-				(jdata->>'received_from')::text,
-				(jdata->>'staff_id')::bigint,
-				(jdata->>'staff_id_document')::text,
-				(jdata->>'counterparty_id')::bigint,
-				(jdata->>'contract')::text,
-				
-				jsonb_build_object(
-					'user_id', _user_id,
-					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
-				)
-			) returning id into _id;
-		else
-			update accounting.cash_receipt_order cro SET
-				financing = _financing,
-				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
-				amount = (jdata->>'amount')::numeric,
-				credit = (jdata->>'credit')::integer,
-				advance_credit = (jdata->>'advance_credit')::integer,
-				description = (jdata->>'description')::text,
-				based_on = (jdata->>'based_on')::text,
-				
-				received_from = (jdata->>'received_from')::text,
-				staff_id = (jdata->>'staff_id')::bigint,
-				staff_id_document = (jdata->>'staff_id_document')::text,
-				counterparty_id = (jdata->>'counterparty_id')::bigint,
-				contract = (jdata->>'contract')::text,
-				
-				created = CASE
-    			    WHEN _created_date IS NOT NULL
-    			    THEN jsonb_set(
-    			             cro.created,
-    			             '{date}',
-    			             to_jsonb(_created_date)
-    			         )
-    			    ELSE cro.created
-    			END,
-				updated = jsonb_build_object(
-					'user_id', _user_id,
-					'date', LOCALTIMESTAMP(0)
-				)
-			where id = _id;
-		end if;
 
-		return json_build_object(
-			'msg', case when _id is null then 'created' else 'updated' end,
-			'status', 200,
-			'id', _id
-		);
-	end;
-$BODY$;
 
-select * from accounting.advance_report
+
+
 
 CREATE OR REPLACE FUNCTION accounting.get_cash_receipt_order_id(
 	)

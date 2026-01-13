@@ -1,21 +1,12 @@
 
 
-create table if not exists accounting.payment_order_incoming (
-	id bigserial primary key,
-	bank_account_id bigint not null references commons.accouting_bank_accounts(id),
-	counterparty_id bigint not null REFERENCES accounting.counterparty(id),
-	cash_flow_article_id bigint not null REFERENCES commons.accouting_cash_flow_articles(id),
-	amount numeric not null,
-	debit integer not null default 111254,
-	credit integer not null,
-	advance_credit integer not null,
-	description text not null,
-	created jsonb not null,
-	updated jsonb
-);
-
 
 select * from accounting.payment_order_incoming;
+
+
+select * from accounting.ledger 
+where id > 104
+order by id;
 
 
 
@@ -31,46 +22,79 @@ AS $BODY$
 		_created_date date = (jdata->>'created_date')::date;
 		_id bigint = (jdata->>'id')::bigint;
 		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
+		_ledger_id bigint = (jdata->>'ledger_id')::bigint;
+		_credit integer = (jdata->>'credit')::integer;
+		_amount numeric = (jdata->>'amount')::numeric;
+		_contract_id bigint = (jdata->>'contract_id')::bigint;
+		_staff_id bigint = (jdata->>'staff_id')::bigint;
 	BEGIN
 
+		/* we fill ledger with the accountingentry */
+		SELECT accounting.upsert_ledger(
+			111254,
+			_credit,
+			_amount,
+			_contract_id,
+			_staff_id,
+			_ledger_id
+		) INTO _ledger_id;
+
+		-- insertion
 		if _id is null then
 			insert into accounting.payment_order_incoming (
 				financing,
 				bank_account_id,
 				counterparty_id,
-				counterparty_contract,
+				contract_id,
+				contract_text,
 				cash_flow_article_id,
 				amount,
 				credit,
-				advance_credit,
 				description,
+				ledger_id,
+				staff_id,
+				staff_id_document,
+				department_id,
+				received_from,
 				created
 			) values (
 				_financing,
 				(jdata->>'bank_account_id')::bigint,
 				(jdata->>'counterparty_id')::bigint,
-				(jdata->>'counterparty_contract')::text,
+				_contract_id,
+				jdata->>'contract_text',
 				(jdata->>'cash_flow_article_id')::bigint,
-				(jdata->>'amount')::numeric,
-				(jdata->>'credit')::integer,
-				(jdata->>'advance_credit')::integer,
-				(jdata->>'description')::text,
+				_amount,
+				_credit,
+				jdata->>'description',
+				_ledger_id,
+				_staff_id,
+				jdata->>'staff_id_document',
+				(jdata->>'department_id')::bigint,
+				jdata->>'received_from',
 				jsonb_build_object(
 					'user_id', _user_id,
 					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
 				)
 			) returning id into _id;
+
+		-- update
 		else
 			update accounting.payment_order_incoming poi SET
 				financing = _financing,
 				bank_account_id = (jdata->>'bank_account_id')::bigint,
 				counterparty_id = (jdata->>'counterparty_id')::bigint,
-				counterparty_contract = (jdata->>'counterparty_contract')::text,
+				contract_id = _contract_id,
+				contract_text = jdata->>'contract_text',
 				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
-				amount = (jdata->>'amount')::numeric,
-				credit = (jdata->>'credit')::integer,
-				advance_credit = (jdata->>'advance_credit')::integer,
-				description = (jdata->>'description')::text,
+				amount = _amount,
+				credit = _credit,
+				description = jdata->>'description',
+				ledger_id = _ledger_id,
+				staff_id = _staff_id,
+				staff_id_document = jdata->>'staff_id_document',
+				department_id = (jdata->>'department_id')::bigint,
+				received_from = jdata->>'received_from',
 				created = CASE
     			    WHEN _created_date IS NOT NULL
     			    THEN jsonb_set(
@@ -101,16 +125,16 @@ select * from accounting.payment_order_incoming
 
 
 
-		select accounting.get_cash_payment_order (
-			'budget',
-			null,
-			null,
-			null,
-			null,
-			null,
-			100,
-			0
-		)
+select accounting.get_cash_payment_order (
+	'budget',
+	null,
+	null,
+	null,
+	null,
+	null,
+	100,
+	0
+)
 
 
 
@@ -121,6 +145,7 @@ CREATE OR REPLACE FUNCTION accounting.get_payment_order_incoming(
 	_date_to text DEFAULT NULL::text,
 	_bank_account_id bigint DEFAULT NULL::bigint,
 	_counterparty_id bigint DEFAULT NULL::bigint,
+	_staff_id bigint DEFAULT NULL::bigint,
 	_limit integer DEFAULT 100,
 	_offset integer DEFAULT 0)
     RETURNS json
@@ -141,6 +166,7 @@ AS $BODY$
 			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_bank_account_id is null or _bank_account_id = bank_account_id)
 			and (_counterparty_id is null or _counterparty_id = counterparty_id)
+			and (_staff_id is null or _staff_id = staff_id)
 		),
 		total_count as (
 			select count(*) total from main
@@ -152,12 +178,17 @@ AS $BODY$
 				'financing', financing,
 				'bank_account_id', bank_account_id,
 				'counterparty_id', counterparty_id,
+				'contract_id', contract_id,
+				'contract_text', contract_text,
+				'ledger_id', ledger_id,
+				'staff_id', staff_id,
+				'staff_id_document', staff_id_document,
+				'department_id', department_id,
 				'cash_flow_article_id', cash_flow_article_id,
 				'amount', amount,
 				'credit', credit,
-				'advance_credit', advance_credit,
 				'description', description,
-				'counterparty_contract', counterparty_contract,
+				'received_from', received_from,
 				'created_date', (created->>'date')::date
 			) aggregated
 			from main
@@ -178,7 +209,8 @@ select accounting.get_payment_order_incoming_id();
 
 
 
-CREATE OR REPLACE FUNCTION accounting.get_payment_order_incoming_id()
+CREATE OR REPLACE FUNCTION accounting.get_payment_order_incoming_id(
+	)
     RETURNS bigint
     LANGUAGE 'plpgsql'
     COST 100

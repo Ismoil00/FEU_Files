@@ -1,6 +1,153 @@
 
 
 
+
+select * from accounting.cash_payment_order
+where id = 3010;
+
+
+select * from accounting.ledger 
+where id > 114
+order by id;
+
+
+
+
+
+CREATE OR REPLACE FUNCTION accounting.upsert_cash_payment_order(
+	jdata json)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE
+		_user_id text = jdata->>'user_id';
+		_created_date date = (jdata->>'created_date')::date;
+		_id bigint = (jdata->>'id')::bigint;
+		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
+		_left_in_cash numeric = 0;
+		_debit integer = (jdata->>'debit')::integer;
+		_amount numeric = (jdata->>'amount')::numeric;
+		_contract_id bigint = (jdata->>'contract_id')::bigint;
+		_staff_id bigint = (jdata->>'staff_id')::bigint;
+		_ledger_id bigint = (jdata->>'ledger_id')::bigint;
+	BEGIN
+
+		/* Cash Amount Check VALIDATION */
+		_left_in_cash = coalesce((
+			select sum(amount) 
+			from accounting.cash_receipt_order
+			where financing = _financing
+		), 0) - coalesce((
+			select sum(amount) 
+			from accounting.cash_payment_order
+			where financing = _financing
+		), 0);
+		if _left_in_cash < _amount then
+			RAISE EXCEPTION 'Запрошенная сумма "%" превышает остаток на кассе "%"', _amount, _left_in_cash;
+		end if;
+
+		/* we fill ledger with the accountingentry */
+		SELECT accounting.upsert_ledger(
+			_debit,
+			111110,
+			_amount,
+			_contract_id,
+			_staff_id,
+			_ledger_id
+		) INTO _ledger_id;
+
+		-- insertion
+		if _id is null then
+			insert into accounting.cash_payment_order (
+				financing,
+				cash_flow_article_id,
+				amount,
+				debit,
+				description,
+				based_on,
+				
+				given_to,
+				department_id,
+				staff_id,
+				staff_id_document,
+				counterparty_id,
+				contract_id,
+				contract_text,
+				ledger_id,
+				
+				created
+			) values (
+				_financing,
+				(jdata->>'cash_flow_article_id')::bigint,
+				_amount,
+				_debit,
+				jdata->>'description',
+				jdata->>'based_on',
+				
+				jdata->>'given_to',
+				(jdata->>'department_id')::bigint,
+				_staff_id,
+				(jdata->>'staff_id_document')::text,
+				(jdata->>'counterparty_id')::bigint,
+				_contract_id,
+				jdata->>'contract_text',
+				_ledger_id,
+				
+				jsonb_build_object(
+					'user_id', _user_id,
+					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
+				)
+			) returning id into _id;
+
+		-- update
+		else
+			update accounting.cash_payment_order cpo SET
+				financing = _financing,
+				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
+				amount = _amount,
+				debit = _debit,
+				description = jdata->>'description',
+				based_on = jdata->>'based_on',
+				
+				given_to = jdata->>'given_to',
+				department_id = (jdata->>'department_id')::bigint,
+				staff_id = _staff_id,
+				staff_id_document = jdata->>'staff_id_document',
+				counterparty_id = (jdata->>'counterparty_id')::bigint,
+				contract_id = _contract_id,
+				contract_text = jdata->>'contract_text',
+				ledger_id = _ledger_id,
+				
+				created = CASE
+    			    WHEN _created_date IS NOT NULL
+    			    THEN jsonb_set(
+    			             cpo.created,
+    			             '{date}',
+    			             to_jsonb(_created_date)
+    			         )
+    			    ELSE cpo.created
+    			END,
+				updated = jsonb_build_object(
+					'user_id', _user_id,
+					'date', LOCALTIMESTAMP(0)
+				)
+			where id = _id;
+		end if;
+
+		return json_build_object(
+			'msg', case when _id is null then 'created' else 'updated' end,
+			'status', 200,
+			'id', _id
+		);
+	end;
+$BODY$;
+
+
+
+
+
 select * from accounting.cash_payment_order;
 
 
@@ -55,16 +202,18 @@ AS $BODY$
 				'cash_flow_article_id', cash_flow_article_id,
 				'amount', amount,
 				'debit', debit,
-				'advance_debit', advance_debit,
 				'description', description,
 				'created_date', (created->>'date')::date,
 				'based_on', based_on,
 				
 				'given_to', given_to,
+				'department_id', department_id,
 				'staff_id', staff_id,
 				'staff_id_document', staff_id_document,
 				'counterparty_id', counterparty_id,
-				'contract', contract
+				'contract_id', contract_id,
+				'contract_text', contract_text,
+				'ledger_id', ledger_id
 			) aggregated
 			from main
 			order by id limit _limit offset _offset
@@ -80,118 +229,9 @@ AS $BODY$
 $BODY$;
 
 
-
 select * from accounting.cash_payment_order
 
 
-
-CREATE OR REPLACE FUNCTION accounting.upsert_cash_payment_order(
-	jdata json)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_user_id text = jdata->>'user_id';
-		_created_date date = (jdata->>'created_date')::date;
-		_id bigint = (jdata->>'id')::bigint;
-		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
-		_amount numeric = (jdata->>'amount')::numeric;
-		_left_in_cash numeric = 0;
-	BEGIN
-
-		/* Cash Amount Check VALIDATION */
-		_left_in_cash = coalesce((
-			select sum(amount) 
-			from accounting.cash_receipt_order
-			where financing = _financing
-		), 0) - coalesce((
-			select sum(amount) 
-			from accounting.cash_payment_order
-			where financing = _financing
-		), 0);
-		if _left_in_cash < _amount then
-			RAISE EXCEPTION 'Запрошенная сумма "%" превышает остаток на кассе "%"', _amount, _left_in_cash;
-		end if;
-
-		-- upsert
-		if _id is null then
-			insert into accounting.cash_payment_order (
-				financing,
-				cash_flow_article_id,
-				amount,
-				debit,
-				advance_debit,
-				description,
-				based_on,
-				
-				given_to,
-				staff_id,
-				staff_id_document,
-				counterparty_id,
-				contract,
-				
-				created
-			) values (
-				_financing,
-				(jdata->>'cash_flow_article_id')::bigint,
-				_amount,
-				(jdata->>'debit')::integer,
-				(jdata->>'advance_debit')::integer,
-				(jdata->>'description')::text,
-				(jdata->>'based_on')::text,
-				
-				(jdata->>'given_to')::text,
-				(jdata->>'staff_id')::bigint,
-				(jdata->>'staff_id_document')::text,
-				(jdata->>'counterparty_id')::bigint,
-				(jdata->>'contract')::text,
-				
-				jsonb_build_object(
-					'user_id', _user_id,
-					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
-				)
-			) returning id into _id;
-		else
-			update accounting.cash_payment_order cpo SET
-				financing = _financing,
-				cash_flow_article_id = (jdata->>'cash_flow_article_id')::bigint,
-				amount = _amount,
-				debit = (jdata->>'debit')::integer,
-				advance_debit = (jdata->>'advance_debit')::integer,
-				description = (jdata->>'description')::text,
-				based_on = (jdata->>'based_on')::text,
-				
-				given_to = (jdata->>'given_to')::text,
-				staff_id = (jdata->>'staff_id')::bigint,
-				staff_id_document = (jdata->>'staff_id_document')::text,
-				counterparty_id = (jdata->>'counterparty_id')::bigint,
-				contract = (jdata->>'contract')::text,
-				
-				created = CASE
-    			    WHEN _created_date IS NOT NULL
-    			    THEN jsonb_set(
-    			             cpo.created,
-    			             '{date}',
-    			             to_jsonb(_created_date)
-    			         )
-    			    ELSE cpo.created
-    			END,
-				updated = jsonb_build_object(
-					'user_id', _user_id,
-					'date', LOCALTIMESTAMP(0)
-				)
-			where id = _id;
-		end if;
-
-		return json_build_object(
-			'msg', case when _id is null then 'created' else 'updated' end,
-			'status', 200,
-			'id', _id
-		);
-	end;
-$BODY$;
 
 
 
