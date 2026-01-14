@@ -455,6 +455,7 @@ BEGIN
 
 			-- ledger tracking
 			SELECT accounting.upsert_ledger(
+				_financing,
 				_debit,
 				_credit,
 				round(_price * (_wquantity - _new_quantity), 2),
@@ -504,6 +505,7 @@ BEGIN
 
 				-- ledger tracking
 				SELECT accounting.upsert_ledger(
+					_financing,
 					_debit,
 					_credit,
 					round(_price * (_wquantity - _quantity_diff), 2),
@@ -524,6 +526,7 @@ BEGIN
 			ELSIF _quantity_diff < 0 THEN
 				-- ledger tracking
 				SELECT accounting.upsert_ledger(
+					_financing,
 					_debit,
 					_credit,
 					round(_price * (_wquantity + abs(_quantity_diff)), 2),

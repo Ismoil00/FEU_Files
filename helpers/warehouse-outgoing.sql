@@ -23,6 +23,8 @@ AS $BODY$
 		_comment text = jdata->>'comment';
 		_storage_location_id bigint = (jdata->>'storage_location_id')::bigint;
 
+		/* table records */
+		_id bigint;
 		_product jsonb;
 		_quantity numeric;
 		_old_quantity numeric;
@@ -34,6 +36,9 @@ AS $BODY$
 		_name_id BIGINT;
 		_import_id BIGINT;
 		_unit_price NUMERIC;
+		_debit integer;
+		_credit integer;
+		_ledger_id bigint;
 	BEGIN
 
 		/* VALIDATION START - STATUS CHECK */
@@ -92,12 +97,16 @@ AS $BODY$
 
 		FOR _product IN SELECT * FROM json_array_elements(jdata->'products') LOOP
 			/* FETCHING VALUES FOR DRY */
+			_id = (_product->>'id')::bigint;
 			_quantity = (_product->>'quantity')::numeric;
 			_name_id = (_product->>'name_id')::bigint;
 			_import_id = (_product->>'import_id')::bigint;
 			_unit_price = (_product->>'unit_price')::numeric;
+			_debit = (_product->>'debit')::integer;
+			_credit = (_product->>'credit')::integer;
+			_ledger_id = (_product->>'ledger_id')::bigint;
 				
-			if (_product->>'id')::bigint is null then
+			if _id is null then
 				/* PRODUCT AMOUNT CHECK VALIDATION */
 				perform accounting.warehouse_product_amount_validation(
 					_storage_location_id,
@@ -107,6 +116,17 @@ AS $BODY$
 					_unit_price,
 					_financing
 				);
+
+				/* we fill ledger with the accountingentry */
+				SELECT accounting.upsert_ledger(
+					_financing,
+					_debit,
+					_credit,
+					round(_unit_price * _quantity, 2),
+					null,
+					null,
+					null
+				) INTO _ledger_id;
 
 				/* CURR-TABLE INSERTION */
 				insert into accounting.warehouse_outgoing (
@@ -127,6 +147,7 @@ AS $BODY$
 					import_id,
 					credit,
 					debit,
+					ledger_id,
 					created
 				) values (
 					_unique_outgoing_number,
@@ -144,8 +165,9 @@ AS $BODY$
 					_quantity,
 					_unit_price,
 					_import_id,
-					(_product->>'credit')::integer,
-					(_product->>'debit')::integer,
+					_credit,
+					_debit,
+					_ledger_id,
 					jsonb_build_object(
 						'user_id', jdata->>'user_id',
 						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
@@ -173,6 +195,17 @@ AS $BODY$
 					);
 				end if;
 
+				/* we update ledger with new accouting entry */
+				SELECT accounting.upsert_ledger(
+					_financing,
+					_debit,
+					_credit,
+					round(_unit_price * _quantity, 2),
+					null,
+					null,
+					_ledger_id
+				) INTO _ledger_id;
+
 				/* CURR-TABLE UPDATE */
 				update accounting.warehouse_outgoing wo SET
 					order_number = _order_number,
@@ -195,11 +228,12 @@ AS $BODY$
 					quantity = _quantity,
 					unit_price = _unit_price,
 					import_id = _import_id,
-					credit = (_product->>'credit')::integer,
-					debit = (_product->>'debit')::integer,
+					credit = _credit,
+					debit = _debit,
+					ledger_id = _ledger_id,
 					storage_location_id = _storage_location_id,
 					updated = _updated
-				where id = (_product->>'id')::bigint;
+				where id = _id;
 			end if;		
     	END LOOP;
 
@@ -224,353 +258,3 @@ $BODY$;
 
 
 
-
-CREATE OR REPLACE FUNCTION accounting.get_warehouse_outgoing_by_unique_outgoing_number(
-	_unique_outgoing_number bigint,
-	_department_id integer)
-    RETURNS jsonb
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_result json;
-	BEGIN
-	
-	WITH outgoing_parent AS (
-	    SELECT DISTINCT ON (wo.unique_outgoing_number)
-	        wo.unique_outgoing_number,
-	        wo.order_number,
-	        wo.financing,
-	        wo.staff_id,
-	        wo.department_id,
-	        wo.doc_id,
-	        wo.status,
-	        wo.through,
-	        (wo.created->>'date')::date AS created_date,
-	        wo.comment,
-	        wo.storage_location_id,
-	        wo.basis
-	    FROM accounting.warehouse_outgoing wo
-	    WHERE wo.unique_outgoing_number = _unique_outgoing_number
-	    ORDER BY wo.unique_outgoing_number, wo.id
-	), outgoing_products AS (
-	    SELECT 
-	        wo.unique_outgoing_number,
-	        jsonb_agg(
-	            jsonb_build_object(
-	                'id', wo.id,
-	                'import_id', wo.import_id,
-	                'name_id', wo.name_id,
-	                'quantity', wo.quantity,
-	                'unit_price', wo.unit_price,
-	                'debit', wo.debit,
-	                'credit', wo.credit
-	            ) ORDER BY wo.name_id
-	        ) AS products
-	    FROM accounting.warehouse_outgoing wo
-	    GROUP BY wo.unique_outgoing_number
-	),
-	outgoing as (
-		SELECT 
-		    p.*,
-		    pr.products
-		FROM outgoing_parent p
-		JOIN outgoing_products pr 
-		USING (unique_outgoing_number)
-	),
-	routing_1 as (
-		select
-			wtr.warehouse_id,
-			row_number() over(
-				order by wtr."createdAt"
-			) as rownumber,
-			jsonb_build_object(
-				'jobposition_id', wtr.jobposition_id,
-				'level', l.level,
-				'fullname', d.fullname,
-				'status', wtr.status,
-				'declined_text', wtr.declined_text,
-				'date', case when wtr."updatedAt" is not null
-					then (wtr."updatedAt")::date 
-					else (wtr."createdAt")::date end,
-				'time', case when wtr."updatedAt" is not null
-					then (wtr."updatedAt")::time 
-					else (wtr."createdAt")::time end
-			) routing_object
-		from (
-			select * from accounting.warehouse_total_routing
-			where warehouse_section = 'outgoing'
-			and warehouse_id = _unique_outgoing_number
-		) wtr
-		left join (
-			select 
-		  		j.id, 
-				concat_ws(' ', s.lastname, s.firstname, s.middlename ) as fullname 
-			from hr.jobposition j
-		  	left join hr.staff s
-		  	on j.staff_id = s.id
-		) d on wtr.jobposition_id = d.id
-		left join (
-			select level, unnest(jobpositions) as jobposition_id 
-			from commons.department_routing_levels
-			where department_id = _department_id
-		) l on wtr.jobposition_id = l.jobposition_id
-		order by wtr."createdAt"
-	),
-	routing_2 as (
-		select
-			warehouse_id,
-			jsonb_object_agg(
-				rownumber,
-				routing_object
-			) as routing
-		from routing_1		
-		group by warehouse_id
-	) select jsonb_build_object(
-		'unique_outgoing_number', og.unique_outgoing_number,
-		'order_number', og.order_number,
-		'financing', og.financing,
-		'staff_id', og.staff_id,
-		'department_id', og.department_id,
-		'doc_id', og.doc_id,
-		'basis', og.basis,
-		'status', og.status,
-		'created_date', og.created_date,
-		'products', og.products,
-		'through', og.through,
-		'comment', og.comment,
-		'storage_location_id', og.storage_location_id,
-		'routing', r2.routing
-	) from outgoing og into _result
-	left join routing_2 r2
-	on og.unique_outgoing_number = r2.warehouse_id;
-
-		return jsonb_build_object(
-			'statusCode', 200,
-			'statusMessage', 'OK',
-			'result', _result
-		);
-	end;
-$BODY$;
-
-
-
-
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.get_warehouse_outgoing(
-	routing_department_id integer,
-	_financing accounting.budget_distribution_type,
-	_order_number bigint DEFAULT NULL::bigint,
-	date_from text DEFAULT NULL::text,
-	date_to text DEFAULT NULL::text,
-	_department_id integer DEFAULT NULL::integer,
-	_staff_id bigint DEFAULT NULL::bigint,
-	_name_id bigint DEFAULT NULL::bigint,
-	_limit integer DEFAULT 100,
-	_offset integer DEFAULT 0)
-    RETURNS jsonb
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_result json;
-		total int;
-		_unique_outgoing_numbers bigint[];
-	BEGIN
-
-		if _name_id is not null then
-			select array_agg(distinct unique_outgoing_number) 
-			into _unique_outgoing_numbers
-			from accounting.warehouse_outgoing
-			where name_id = _name_id;
-		end if;
-
-		/* COUTING TOTAL */
-		select count(distinct wo.unique_outgoing_number) into total
-		from accounting.warehouse_outgoing wo
-		where wo.financing = _financing 
-		and (wo.order_number = _order_number or _order_number is null)
-		and (date_from is null or (wo.created->>'date')::date >= date_from::date)
-		and (date_to is null or (wo.created->>'date')::date <= date_to::date)
-		and (wo.department_id = _department_id or _department_id is null)
-		and (wo.staff_id = _staff_id or _staff_id is null)
-		and (_name_id is null or wo.unique_outgoing_number = any(_unique_outgoing_numbers));
-		
-
-		WITH outgoing_parent AS (
-		    SELECT DISTINCT ON (wo.unique_outgoing_number)
-		        wo.unique_outgoing_number,
-		        wo.order_number,
-		        wo.financing,
-		        wo.staff_id,
-		        wo.department_id,
-		        wo.doc_id,
-		        wo.status,
-		        wo.through,
-		        (wo.created->>'date')::date AS created_date,
-		        wo.comment,
-		        wo.storage_location_id,
-		        wo.basis
-		    FROM accounting.warehouse_outgoing wo
-		    WHERE wo.financing = _financing
-		      AND (_order_number IS NULL OR wo.order_number = _order_number)
-		      AND (date_from IS NULL OR (wo.created->>'date')::date >= date_from::date)
-		      AND (date_to   IS NULL OR (wo.created->>'date')::date <= date_to::date)
-		      AND (_department_id IS NULL OR wo.department_id = _department_id)
-		      AND (_staff_id IS NULL OR wo.staff_id = _staff_id)
-		      AND (_name_id IS NULL OR wo.unique_outgoing_number = ANY(_unique_outgoing_numbers))
-		    ORDER BY wo.unique_outgoing_number, wo.id
-		), outgoing_products AS (
-		    SELECT 
-		        wo.unique_outgoing_number,
-		        jsonb_agg(
-		            jsonb_build_object(
-		                'id', wo.id,
-		                'import_id', wo.import_id,
-		                'name_id', wo.name_id,
-		                'quantity', wo.quantity,
-		                'unit_price', wo.unit_price,
-		                'debit', wo.debit,
-		                'credit', wo.credit
-		            ) ORDER BY wo.name_id
-		        ) AS products
-		    FROM accounting.warehouse_outgoing wo
-		    GROUP BY wo.unique_outgoing_number
-		),
-		outgoing as (
-			SELECT 
-			    p.*,
-			    pr.products
-			FROM outgoing_parent p
-			JOIN outgoing_products pr 
-			USING (unique_outgoing_number)
-		),
-		routing_1 as (
-			select
-				wtr.warehouse_id,
-				row_number() over(
-					partition by wtr.warehouse_id
-					order by wtr.warehouse_id, wtr."createdAt"
-				) as rownumber,
-				jsonb_build_object(
-					'jobposition_id', wtr.jobposition_id,
-					'level', l.level,
-					'fullname', d.fullname,
-					'status', wtr.status,
-					'declined_text', wtr.declined_text,
-					'date', case when wtr."updatedAt" is not null
-						then (wtr."updatedAt")::date 
-						else (wtr."createdAt")::date end,
-					'time', case when wtr."updatedAt" is not null
-						then (wtr."updatedAt")::time 
-						else (wtr."createdAt")::time end
-				) routing_object
-			from (
-				select * from accounting.warehouse_total_routing
-				where warehouse_section = 'outgoing' 
-			) wtr
-			left join (
-				select 
-			  		j.id, 
-					concat_ws(' ', s.lastname, s.firstname, s.middlename ) as fullname 
-				from hr.jobposition j
-			  	left join hr.staff s
-			  	on j.staff_id = s.id
-			) d on wtr.jobposition_id = d.id
-			left join (
-				select level, unnest(jobpositions) as jobposition_id 
-				from commons.department_routing_levels
-				where department_id = routing_department_id
-			) l on wtr.jobposition_id = l.jobposition_id
-			order by wtr.warehouse_id, wtr."createdAt"
-		), 
-		routing_2 as (
-			select
-				warehouse_id,
-				jsonb_object_agg(
-					rownumber,
-					routing_object
-				) as routing
-			from routing_1		
-			group by warehouse_id
-		), 
-		final_join as (
-			select
-				row_number() over(order by og.order_number) as key,
-				og.*,
-				r2.routing
-			from outgoing og
-			left join routing_2 r2
-			on og.unique_outgoing_number = r2.warehouse_id
-			order by og.order_number desc 
-			limit _limit offset _offset
-		) select jsonb_agg(fj)
-		into _result
-		from final_join fj;
-
-		return jsonb_build_object(
-			'statusCode', 200,
-			'statusMessage', 'OK',
-			'total', total,
-			'results', _result
-		);
-	end;
-$BODY$;
-
-
-
-
-
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.warehouse_product_amount_validation(
-	_name_id bigint,
-	_import_id bigint,
-	_amount numeric)
-    RETURNS void
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-declare
-	lef_quantity numeric;
-	_product_name text;
-begin
-
-	select
-	    coalesce(i.quantity, 0) - coalesce(e.quantity, 0)
-	into lef_quantity
-	from (
-	    select sum(quantity) as quantity
-	    from accounting.warehouse_incoming
-	    where name_id = _name_id
-	      and closed is not true
-	      and unique_import_number = _import_id
-	      and status = 'approved'
-	) i
-	cross join (
-	    select sum(quantity) as quantity
-	    from accounting.warehouse_outgoing
-	    where name_id = _name_id
-	      and closed is not true
-	      and import_id = _import_id
-	      -- and status = 'approved'
-	) e;
-
-	if lef_quantity < _amount then
-		select name->>'ru'
-		into _product_name
-		from commons.nomenclature
-		where id = _name_id;
-		
-	    raise exception 'Запрошенное количество % превышает доступный % для данного товара "%"', _amount, lef_quantity, _product_name;
-	end if;
-end;
-$BODY$;

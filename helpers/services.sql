@@ -95,6 +95,7 @@ AS $BODY$
 			if _id is null then
 				/* we fill ledger with the accounting entry */
 				SELECT accounting.upsert_ledger(
+					_financing,
 					_debit,
 					_credit,
 					round(_unit_price * _quantity, 2),
@@ -146,6 +147,7 @@ AS $BODY$
 				isUpdate = true;
 				/* we update ledger with new accouting entry */
 				SELECT accounting.upsert_ledger(
+					_financing,
 					_debit,
 					_credit,
 					round(_unit_price * _quantity, 2),

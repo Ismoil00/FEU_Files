@@ -21,6 +21,8 @@ select * from accounting.accounts
 
 
 
+
+
 select accounting.upsert_ledger (
 	213900,
 	412520,
@@ -35,7 +37,9 @@ select * from accounting.ledger;
 
 
 
+
 CREATE OR REPLACE FUNCTION accounting.upsert_ledger(
+	_financing accounting.budget_distribution_type,
 	_debit integer,
 	_credit integer,
 	_amount numeric,
@@ -67,6 +71,7 @@ BEGIN
 
 	-- insert
 	insert into accounting.ledger (
+		financing,
 		debit,
 		credit,
 		amount,
@@ -74,6 +79,7 @@ BEGIN
 		staff_id,
 		draft
 	) values (
+		_financing,
 		_debit,
 		_credit,
 		_amount,

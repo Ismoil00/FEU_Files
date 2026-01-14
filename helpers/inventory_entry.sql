@@ -490,6 +490,7 @@ BEGIN
 			
 			-- ledger tracking
 			SELECT accounting.upsert_ledger(
+				_financing,
 				_debit,
 				_credit,
 				round(_unit_price * (_wquantity + _new_quantity), 2),
@@ -554,6 +555,7 @@ BEGIN
 				
 				-- ledger tracking
 				SELECT accounting.upsert_ledger(
+					_financing,
 					_debit,
 					_credit,
 					round(_unit_price * (_wquantity + _quantity_diff), 2),

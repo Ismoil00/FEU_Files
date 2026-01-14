@@ -1,16 +1,7 @@
 create type accounting.advance_type as enum ('advances', 'tmz', 'oplata', 'prochee');
 
-create table if not exists accounting.advance_report (
-	id bigserial primary key,
-	staff_id bigint not null references hr.staff(id),
-	purpose text not null,
-	credit integer not null default 114610,
-	debit integer not null,
-	advance_type accounting.advance_type not null,
-	table_data jsonb not null,
-	created jsonb not null,
-	updated json
-);
+
+
 
 
 select * from accounting.advance_report;
@@ -19,6 +10,74 @@ select * from accounting.advance_report;
 
 
 
+
+
+
+
+
+drop function accounting.insert_advance_report_ledgers;
+
+
+
+create or replace function accounting.insert_advance_report_ledgers (
+	_financing accounting.budget_distribution_type,
+	_credit integer,
+	_table_data jsonb,
+	_staff_id bigint,
+	_advance_type accounting.advance_type
+)
+    RETURNS jsonb
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE
+		_updated_table_data jsonb = '[]'::jsonb;
+		_entry jsonb;
+		_ledger_id bigint;
+		_debit integer;
+		_amount numeric;
+		_contract_id bigint;
+	BEGIN
+
+		FOR _entry IN SELECT * FROM json_array_elements(_table_data) LOOP
+			_ledger_id = (_entry->>'ledger_id')::bigint;
+			_debit = (_entry->>'debit')::integer;
+			_amount = case when _advance_type = 'tmz' then 
+				coalesce((_entry->>'quantity')::numeric, 0) * 
+					coalesce((_entry->>'price')::numeric, 0)
+				else (_entry->>'amount')::numeric end;
+			_contract_id = (_entry->>'contract_id')::bigint;
+			
+			/* we fill ledger with the accountingentry */
+			SELECT accounting.upsert_ledger(
+				_financing,
+				_debit,
+				_credit,
+				_amount,
+				_contract_id,
+				_staff_id,
+				_ledger_id
+			) INTO _ledger_id;
+
+			-- we set new ledger_id
+			_updated_table_data = _updated_table_data || jsonb_build_array(
+				_entry || jsonb_build_object(
+					'ledger_id', 
+					_ledger_id
+				)
+			);
+		END LOOP;
+
+		RETURN _updated_table_data;
+	END;
+$BODY$;
+
+
+
+
+
+		
 CREATE OR REPLACE FUNCTION accounting.upsert_advance_report(
 	jdata json)
     RETURNS json
@@ -34,42 +93,50 @@ AS $BODY$
 		isUpdate boolean = false;
 		
 		_staff_id bigint = (jdata->>'staff_id')::bigint;
-		_purpose text = (jdata->>'purpose')::text;
+		_purpose text = jdata->>'purpose';
 		_advance_type accounting.advance_type = (jdata->>'advance_type')::accounting.advance_type;
-		_counterparty_id bigint = (jdata->>'counterparty_id')::bigint;
 		_table_data jsonb = (jdata->>'table_data')::jsonb;
 	BEGIN
 
+		/* setting on ledgers the entries */
+		select accounting.insert_advance_report_ledgers (
+			_financing,
+			114610,
+			_table_data,
+			_staff_id,
+			_advance_type
+		) into _table_data;
+
+		-- insertion
 		if _id is null then
 			insert into accounting.advance_report (
 				financing,
 				staff_id,
 				purpose,
-				debit,
 				advance_type,
 				table_data,
 				created
 			) values (
 				_financing,
-				(jdata->>'staff_id')::bigint,
-				(jdata->>'purpose')::text,
-				(jdata->>'debit')::integer,
-				(jdata->>'advance_type')::accounting.advance_type,
-				(jdata->>'table_data')::jsonb,
+				_staff_id,
+				_purpose,
+				_advance_type,
+				_table_data,
 				jsonb_build_object(
 					'user_id', _user_id,
 					'date', coalesce(_created_date, LOCALTIMESTAMP(0))
 				)
 			);
+
+		-- update
 		else
 			isUpdate = true;
 			update accounting.advance_report ar SET
 				financing = _financing,
-				staff_id = (jdata->>'staff_id')::bigint,
-				purpose = (jdata->>'purpose')::text,
-				debit = (jdata->>'debit')::integer,
-				advance_type = (jdata->>'advance_type')::accounting.advance_type,
-				table_data = (jdata->>'table_data')::jsonb,
+				staff_id = _staff_id,
+				purpose = _purpose,
+				advance_type = _advance_type,
+				table_data = _table_data,
 				created = CASE
     			    WHEN _created_date IS NOT NULL
     			    THEN jsonb_set(
@@ -94,6 +161,18 @@ AS $BODY$
 $BODY$;
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 select accounting.get_advance_report();
 
 
@@ -105,7 +184,6 @@ CREATE OR REPLACE FUNCTION accounting.get_advance_report(
 	_date_from text DEFAULT NULL::text,
 	_date_to text DEFAULT NULL::text,
 	_staff_id bigint DEFAULT NULL::bigint,
-	_debit integer DEFAULT NULL::integer,
 	_limit integer DEFAULT 1000,
 	_offset integer DEFAULT 0
 )
@@ -126,7 +204,6 @@ AS $BODY$
 			and (_date_from is null or _date_from::date <= (created->>'date')::date)
 			and (_date_to is null or _date_to::date >= (created->>'date')::date)
 			and (_staff_id is null or _staff_id = staff_id)
-			and (_debit is null or _debit = debit)
 		),
 		total_count as (
 			select count(*) total from main
@@ -138,7 +215,6 @@ AS $BODY$
 				'financing', financing,
 				'staff_id', staff_id,
 				'purpose', purpose,
-				'debit', debit,
 				'advance_type', advance_type,
 				'table_data', table_data,
 				'created_date', (created->>'date')::date
@@ -158,9 +234,23 @@ $BODY$;
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 select accounting.get_advance_report_report_number();
 
-CREATE OR REPLACE FUNCTION accounting.get_advance_report_id()
+CREATE OR REPLACE FUNCTION accounting.get_advance_report_id(
+	)
     RETURNS bigint
     LANGUAGE 'plpgsql'
     COST 100

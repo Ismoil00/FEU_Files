@@ -29,6 +29,7 @@ AS $BODY$
 
 		/* we fill ledger with the accountingentry */
 		SELECT accounting.upsert_ledger(
+			_financing,
 			_debit,
 			111254,
 			_amount,

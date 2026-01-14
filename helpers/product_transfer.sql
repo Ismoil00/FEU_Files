@@ -86,6 +86,7 @@ AS $BODY$
 
 				/* we fill ledger with the accounting entry */
 				SELECT accounting.upsert_ledger(
+					_financing,
 					_debit,
 					_credit,
 					round(_unit_price * _quantity, 2),
