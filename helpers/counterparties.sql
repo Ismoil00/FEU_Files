@@ -1,3 +1,6 @@
+
+
+
 CREATE OR REPLACE FUNCTION accounting.get_all_counterparty(
 	)
     RETURNS json
@@ -18,7 +21,6 @@ BEGIN
 			itn, 
 			details,
 			doc_id,
-			bank_details,
 			(created->>'date')::date created_date
 		from accounting.counterparty
 	) ac;
@@ -31,10 +33,10 @@ $BODY$;
 
 
 
+select * from accounting.counterparty
 
 
-
-
+	
 
 
 CREATE OR REPLACE FUNCTION accounting.get_counterparties(
@@ -43,7 +45,8 @@ CREATE OR REPLACE FUNCTION accounting.get_counterparties(
 	_bank_name text DEFAULT NULL::text,
 	_bank_account text DEFAULT NULL::text,
 	_limit integer DEFAULT 100,
-	_offset integer DEFAULT 0)
+	_offset integer DEFAULT 0
+)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100
@@ -65,7 +68,7 @@ BEGIN
 		AND (_bank_account IS NULL OR cbd.bank_account = _bank_account);
 
 	SELECT jsonb_agg(ac.aggregated) INTO _result
-	FROM (
+		FROM (
 		SELECT jsonb_build_object(
 			'id', ac.id,
 			'name', ac.name,
@@ -77,7 +80,7 @@ BEGIN
 			'created_date', (ac.created->>'date')::date
 		) aggregated
 		FROM accounting.counterparty ac
-		inner join (
+		LEFT JOIN (
 			select 
 				counterparty_id,
 				jsonb_agg(

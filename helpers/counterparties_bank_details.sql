@@ -1,6 +1,8 @@
 -- select * from accounting.counterparty;
 
 
+select * from commons.counterparty_banks_details
+
 
 create table if not exists commons.counterparty_banks_details (
 	id bigserial primary key,
@@ -15,6 +17,9 @@ create table if not exists commons.counterparty_banks_details (
 );
 
 
+
+
+
 CREATE OR REPLACE FUNCTION commons.upsert_counterparty_banks_details(jdata jsonb)
     RETURNS jsonb
     LANGUAGE 'plpgsql'
@@ -22,11 +27,11 @@ CREATE OR REPLACE FUNCTION commons.upsert_counterparty_banks_details(jdata jsonb
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
 DECLARE
-   _id bigint = (jdata->'id')::bigint;
+   _id bigint = (jdata->>'id')::bigint;
    _result jsonb;
    is_update boolean;
    _counterparty_id bigint = (jdata->>'counterparty_id')::bigint;
-   _name text = (jdata->>'name')::text;
+   _name text = jdata->>'name';
 BEGIN
 
 	if exists (
