@@ -43,11 +43,10 @@ CREATE OR REPLACE FUNCTION reports.get_material_statement(
 	_financing accounting.budget_distribution_type,
 	start_date text,
 	end_date text,
-	_debit integer DEFAULT null,
-	_location_id bigint default null,
+	_debit integer DEFAULT NULL::integer,
+	_location_id bigint DEFAULT NULL::bigint,
 	_limit integer DEFAULT 1000,
-	_offset integer DEFAULT 0
-)
+	_offset integer DEFAULT 0)
     RETURNS json
     LANGUAGE 'plpgsql'
     COST 100

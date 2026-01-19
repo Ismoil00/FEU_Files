@@ -12,6 +12,15 @@ select * from accounting.cash_payment_order
 select * from accounting.counterparty
 
 
+
+select reports.get_cash_book (
+	'budget',
+	'2025-01-01',
+	'2025-12-31',
+	100,
+	0
+);
+
 CREATE OR REPLACE FUNCTION reports.get_cash_book(
 	_financing accounting.budget_distribution_type,
 	start_date text,
@@ -35,15 +44,16 @@ BEGIN
 			id,
 			(created->>'date')::date as created_date,
 			true as cash_receipt_order,
-			concat_ws(', ', credit::text, advance_credit::text) as account,
+			credit as account,
 			amount as debit_amount,
 			null as credit_amount,
 			staff_id,
 			counterparty_id,
 			received_from as base
 		from accounting.cash_receipt_order
-		where (created->>'date')::date >= '2025-01-01'
-		and (created->>'date')::date <= '2025-12-31'
+		where financing = _financing 
+		and (created->>'date')::date >= _date_from
+		and (created->>'date')::date <= _date_to
 
 		union all 
 
@@ -51,21 +61,22 @@ BEGIN
 			id,
 			(created->>'date')::date as created_date,
 			false as cash_receipt_order,
-			concat_ws(', ', debit::text, advance_debit::text) as account,
+			debit as account,
 			null as debit_amount,
 			amount as credit_amount,
 			staff_id,
 			counterparty_id,
 			given_to as base
 		from accounting.cash_payment_order
-		where (created->>'date')::date >= '2025-01-01'
-		and (created->>'date')::date <= '2025-12-31'
+		where financing = _financing 
+		and (created->>'date')::date >= _date_from
+		and (created->>'date')::date <= _date_to
 	),
 	main_filtered_and_ordered as (
 		select jsonb_build_object(
-			'key', row_number() over(order by created_date),
+			'key', row_number() over(order by created_date desc),
 			'id', m.id,
-			'created_date', m.created_date,
+			'document_number', m.id || ', ' || 'аз ' || m.created_date,
 			'name', case 
 					when m.base = 'staff' then concat_ws(' ', s.lastname, s.firstname, s.middlename)
 					when m.base = 'counterparty' then c.name
@@ -75,25 +86,78 @@ BEGIN
 			'account', m.account,
 			'debit_amount', m.debit_amount,
 			'credit_amount', m.credit_amount
-		) as obj
+		) as paginated_rows
 		from main m
 		left join hr.staff s 
 			on m.staff_id = s.id
 		left join accounting.counterparty c 
 			on m.counterparty_id = c.id
-		order by created_date
+		order by created_date desc
+		limit _limit offset _offset
 	),
-	month_start as (
-		select amount 
-		from accounting.cash_receipt_order
-
-
-		select * from accounting.cash_payment_order
+	main_paginated as (
+		select jsonb_agg(paginated_rows)
+		as aggregated_rows
+		from main_filtered_and_ordered
 	),
-	month_end as (
-		
-	)
-	select * from main_filtered_and_ordered;
+	table_total_count as (
+		select count(*) as total from main
+	),
+	period_start as (
+		select
+			case 
+				when (incomings.total_amount - expenses.total_amount) > 0
+				then 'period_start_debit'
+				when (incomings.total_amount - expenses.total_amount) < 0
+				then 'period_start_credit'
+				else null
+			end col_name,
+			abs(incomings.total_amount - expenses.total_amount) left_amount
+		from (
+			select sum(amount) total_amount
+			from accounting.cash_receipt_order
+			where (created->>'date')::date < _date_from
+		) incomings cross join (
+			select sum(amount) total_amount
+			from accounting.cash_payment_order
+			where (created->>'date')::date < _date_from
+		) expenses
+	),
+	period_end as (
+		select
+			case 
+				when (incomings.total_amount - expenses.total_amount) > 0
+				then 'period_end_debit'
+				when (incomings.total_amount - expenses.total_amount) < 0
+				then 'period_end_credit'
+				else null
+			end col_name,
+			abs(incomings.total_amount - expenses.total_amount) left_amount
+		from (
+			select sum(amount) total_amount
+			from accounting.cash_receipt_order
+			where (created->>'date')::date < _date_to
+		) incomings cross join (
+			select sum(amount) total_amount
+			from accounting.cash_payment_order
+			where (created->>'date')::date < _date_to
+		) expenses
+	),
+	totals as (
+		select 
+			sum(debit_amount) total_debit_amount, 
+			sum(credit_amount) total_credit_amount
+		from main
+	) select jsonb_build_object(
+		'total_debit_amount', t.total_debit_amount,
+		'total_credit_amount', t.total_credit_amount,
+		ps.col_name, ps.left_amount,
+		pe.col_name, pe.left_amount,
+		'table_data', mp.aggregated_rows,
+		'total', (select total from table_total_count),
+		'status', 200
+	) into _result from totals t, period_start ps, 
+		period_end pe, main_paginated mp;
 	
 	return _result;
 end;
