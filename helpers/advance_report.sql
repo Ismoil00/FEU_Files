@@ -50,6 +50,7 @@ AS $BODY$
 		_user_id uuid = (jdata->>'user_id')::uuid;
 		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
 		_staff_id bigint = (jdata->>'staff_id')::bigint;
+		_department_id bigint = (jdata->>'department_id')::bigint;
 		_description text = jdata->>'description';
 		_created_date date = (jdata->>'created_date')::date;
 		isUpdate boolean = false;
@@ -98,6 +99,7 @@ AS $BODY$
 				insert into accounting.advance_report_tmzos (
 					operation_number,
 					financing,
+					department_id,
 					staff_id,
 					description,
 				
@@ -115,6 +117,7 @@ AS $BODY$
 				) values (
 					_operation_number,
 					_financing,
+					_department_id,
 					_staff_id,
 					_description,
 				
@@ -149,9 +152,10 @@ AS $BODY$
 					_ledger_id
 				) INTO _ledger_id;
 
-				update accounting.advance_report_tmzos set 
+				update accounting.advance_report_tmzos art set 
 					operation_number = _operation_number,
 					financing = _financing,
+					department_id = _department_id,
 					staff_id = _staff_id,
 					description = _description,
 				
@@ -169,11 +173,11 @@ AS $BODY$
 					created = CASE
     				    WHEN _created_date IS NOT NULL
     				    THEN jsonb_set(
-    				             wi.created,
+    				             art.created,
     				             '{date}',
     				             to_jsonb(_created_date)
     				         )
-    				    ELSE wi.created
+    				    ELSE art.created
     				END,
 					updated = jsonb_build_object(
 						'user_id', _user_id,
@@ -228,6 +232,21 @@ create table if not exists accounting.advance_report_oplata (
 
 
 
+
+select * from accounting.advance_report_oplata;
+
+
+
+select * from accounting.ledger
+where id > 123
+order by id;
+
+
+
+select * from accounting.product_transfer;
+
+
+
 create or replace function accounting.upsert_advance_report_oplata (
 	jdata jsonb
 )
@@ -240,6 +259,7 @@ AS $BODY$
 		_operation_number bigint = (jdata->>'operation_number')::bigint;
 		_user_id uuid = (jdata->>'user_id')::uuid;
 		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
+		_department_id bigint = (jdata->>'department_id')::bigint;
 		_staff_id bigint = (jdata->>'staff_id')::bigint;
 		_description text = jdata->>'description';
 		_created_date date = (jdata->>'created_date')::date;
@@ -289,6 +309,7 @@ AS $BODY$
 				insert into accounting.advance_report_oplata (
 					operation_number,
 					financing,
+					department_id,
 					staff_id,
 					description,
 				
@@ -309,6 +330,7 @@ AS $BODY$
 				) values (
 					_operation_number,
 					_financing,
+					_department_id,
 					_staff_id,
 					_description,
 				
@@ -346,9 +368,10 @@ AS $BODY$
 					_ledger_id
 				) INTO _ledger_id;
 
-				update accounting.advance_report_oplata set 
+				update accounting.advance_report_oplata aro set 
 					operation_number = _operation_number,
 					financing = _financing,
+					department_id = _department_id,
 					staff_id = _staff_id,
 					description = _description,
 				
@@ -368,11 +391,11 @@ AS $BODY$
 					created = CASE
     				    WHEN _created_date IS NOT NULL
     				    THEN jsonb_set(
-    				             wi.created,
+    				             aro.created,
     				             '{date}',
     				             to_jsonb(_created_date)
     				         )
-    				    ELSE wi.created
+    				    ELSE aro.created
     				END,
 					updated = jsonb_build_object(
 						'user_id', _user_id,
@@ -427,6 +450,18 @@ create table if not exists accounting.advance_report_prochee (
 
 
 
+
+
+select * from accounting.advance_report_prochee;
+
+
+
+select * from accounting.ledger
+where id > 123
+order by id;
+
+
+
 create or replace function accounting.upsert_advance_report_prochee (
 	jdata jsonb
 )
@@ -439,6 +474,7 @@ AS $BODY$
 		_operation_number bigint = (jdata->>'operation_number')::bigint;
 		_user_id uuid = (jdata->>'user_id')::uuid;
 		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
+		_department_id bigint = (jdata->>'department_id')::bigint;
 		_staff_id bigint = (jdata->>'staff_id')::bigint;
 		_description text = jdata->>'description';
 		_created_date date = (jdata->>'created_date')::date;
@@ -486,6 +522,7 @@ AS $BODY$
 				insert into accounting.advance_report_prochee (
 					operation_number,
 					financing,
+					department_id,
 					staff_id,
 					description,
 				
@@ -504,6 +541,7 @@ AS $BODY$
 				) values (
 					_operation_number,
 					_financing,
+					_department_id,
 					_staff_id,
 					_description,
 				
@@ -539,9 +577,10 @@ AS $BODY$
 					_ledger_id
 				) INTO _ledger_id;
 
-				update accounting.advance_report_prochee set 
+				update accounting.advance_report_prochee arp set 
 					operation_number = _operation_number,
 					financing = _financing,
+					department_id = _department_id,
 					staff_id = _staff_id,
 					description = _description,
 				
@@ -559,11 +598,11 @@ AS $BODY$
 					created = CASE
     				    WHEN _created_date IS NOT NULL
     				    THEN jsonb_set(
-    				             wi.created,
+    				             arp.created,
     				             '{date}',
     				             to_jsonb(_created_date)
     				         )
-    				    ELSE wi.created
+    				    ELSE arp.created
     				END,
 					updated = jsonb_build_object(
 						'user_id', _user_id,
@@ -586,10 +625,130 @@ $BODY$;
 /* -------------------------------------- */
 
 
+/* -------------------------------------- */
+-- 	     Advance Report Staff Debts
+/* -------------------------------------- */
 
 
+select accounting.fetch_staff_debts_for_advance_reports (
+	3674
+);
 
+create or replace function accounting.fetch_staff_debts_for_advance_reports (
+	_staff_id bigint,
+	_limit integer default 100,
+	_offset integer default 0
+)
+RETURNS jsonb
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+	DECLARE
+		_result jsonb;
+	BEGIN
 
+		with advances as (
+			select
+				'payment_order_outgoing' as "section",
+				financing,
+				id,
+				cash_flow_article_id,
+				amount,
+				debit,
+				credit,
+				(created->>'date')::date created_date
+			from accounting.payment_order_outgoing
+			where staff_id = _staff_id
+	
+			union all
+				
+			select
+				'cash_payment_order' as "section",
+				financing,
+				id,
+				cash_flow_article_id,
+				amount,
+				debit,
+				credit,
+				(created->>'date')::date created_date
+			from accounting.cash_payment_order
+			where staff_id = _staff_id
+		),
+		returnss as (
+			select
+				round(quantity * unit_price, 2) as amount,
+				advance_id
+			from accounting.advance_report_tmzos
+			where staff_id = _staff_id
+	
+			union all
+	
+			select
+				amount,
+				advance_id
+			from accounting.advance_report_oplata
+			where staff_id = _staff_id
+	
+			union all
+	
+			select
+				amount,
+				advance_id
+			from accounting.advance_report_prochee
+			where staff_id = _staff_id
+		),
+		lefts as (
+			select
+				a.id,
+				a."section",
+				a.financing,
+				a.cash_flow_article_id,
+				(a.amount - sum(coalesce(r.amount, 0))) as left_amount,
+				a.debit,
+				a.credit,
+				a.created_date
+			from advances a
+			left join returnss r
+				on a.id = r.advance_id
+			group by a.id,
+				a."section",
+				a.financing,
+				a.cash_flow_article_id,
+				a.amount,
+				a.debit,
+				a.credit,
+				a.created_date
+		),
+		table_total as (
+			select count(*) as total from lefts
+		),
+		paginated as (
+			select jsonb_build_object(
+				'key', row_number() over(order by created_date),
+				'id', id,
+				'section', "section",
+				'financing', financing,
+				'cash_flow_article_id', cash_flow_article_id,
+				'left_amount', left_amount,
+				'debit', debit,
+				'credit', credit,
+				'created_date', created_date
+			) as aggregated from lefts
+			order by created_date
+			limit _limit offset _offset
+		) select jsonb_build_object (
+			'status', 200,
+			'results', jsonb_agg(p.aggregated),
+			'total', (select total from table_total)
+		) into _result from paginated p;
+
+		return _result;
+	END;
+$BODY$;
+/* -------------------------------------- */
+--------------------------------------------
+/* -------------------------------------- */
 
 create or replace function accounting.upsert_advance_report (
 	_advance_type accounting.advance_type,
@@ -654,6 +813,7 @@ AS $BODY$
 				select DISTINCT ON (operation_number)
 					operation_number,
 					financing,
+					department_id,
 					staff_id,
 					description,
 					(created->>'date')::date created_date
@@ -670,6 +830,11 @@ AS $BODY$
 			        jsonb_agg(
 			            jsonb_build_object(
 			                'id', id,
+			                'key', id,
+							'document_name', document_name,
+			            	'document_number', document_number,
+			            	'document_date', document_date,
+			            	'counterparty', counterparty,
 			            	'name_id', name_id,
 			            	'unit_price', unit_price,
 			            	'quantity', quantity,
@@ -696,6 +861,7 @@ AS $BODY$
 					'key', row_number() over(order by created_date),
 					'operation_number', operation_number,
 					'financing', financing,
+					'department_id', department_id,
 					'staff_id', staff_id,
 					'description', description,
 					'table_data', table_data,
@@ -716,6 +882,7 @@ AS $BODY$
 				select DISTINCT ON (operation_number)
 					operation_number,
 					financing,
+					department_id,
 					staff_id,
 					description,
 					(created->>'date')::date created_date
@@ -732,6 +899,7 @@ AS $BODY$
 			        jsonb_agg(
 			            jsonb_build_object(
 			                'id', id,
+							'key', id,
 			            	'document_name', document_name,
 			            	'document_number', document_number,
 			            	'document_date', document_date,
@@ -763,6 +931,7 @@ AS $BODY$
 					'key', row_number() over(order by created_date),
 					'operation_number', operation_number,
 					'financing', financing,
+					'department_id', department_id,
 					'staff_id', staff_id,
 					'description', description,
 					'table_data', table_data,
@@ -783,6 +952,7 @@ AS $BODY$
 				select DISTINCT ON (operation_number)
 					operation_number,
 					financing,
+					department_id,
 					staff_id,
 					description,
 					(created->>'date')::date created_date
@@ -799,6 +969,7 @@ AS $BODY$
 			        jsonb_agg(
 			            jsonb_build_object(
 			                'id', id,
+							'key', id,
 			            	'document_name', document_name,
 			            	'document_number', document_number,
 			            	'document_date', document_date,
@@ -828,6 +999,7 @@ AS $BODY$
 					'key', row_number() over(order by created_date),
 					'operation_number', operation_number,
 					'financing', financing,
+					'department_id', department_id,
 					'staff_id', staff_id,
 					'description', description,
 					'table_data', table_data,
