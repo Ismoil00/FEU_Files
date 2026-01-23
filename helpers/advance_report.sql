@@ -96,6 +96,8 @@ AS $BODY$
 					null
 				) INTO _ledger_id;
 
+				select * from accounting.warehouse_incoming
+
 				insert into accounting.advance_report_tmzos (
 					operation_number,
 					financing,
@@ -113,6 +115,8 @@ AS $BODY$
 					debit,
 					ledger_id,
 					counterparty,
+					advance_id,
+					
 					created
 				) values (
 					_operation_number,
@@ -131,6 +135,9 @@ AS $BODY$
 					_debit,
 					_ledger_id,
 					_row->>'counterparty',
+					(_row->>'advance_id')::bigint,
+
+					
 					jsonb_build_object(
 						'user_id', _user_id,
 						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
@@ -169,6 +176,7 @@ AS $BODY$
 					debit = _debit,
 					ledger_id = _ledger_id,
 					counterparty = _row->>'counterparty',
+					advance_id = (_row->>'advance_id')::bigint,
 					
 					created = CASE
     				    WHEN _created_date IS NOT NULL
@@ -325,6 +333,7 @@ AS $BODY$
 					contract_id,
 					contract_text,
 					content,
+					advance_id,
 					
 					created
 				) values (
@@ -346,6 +355,7 @@ AS $BODY$
 					_contract_id,
 					_row->>'contract_text',
 					_row->>'content',
+					(_row->>'advance_id')::bigint,
 					
 					jsonb_build_object(
 						'user_id', _user_id,
@@ -387,6 +397,7 @@ AS $BODY$
 					contract_id = _contract_id,
 					contract_text = _row->>'contract_text',
 					content = _row->>'content',
+					advance_id = (_row->>'advance_id')::bigint,
 					
 					created = CASE
     				    WHEN _created_date IS NOT NULL
@@ -456,7 +467,8 @@ select * from accounting.advance_report_prochee;
 
 
 
-select * from accounting.ledger
+select * 
+from accounting.ledger
 where id > 123
 order by id;
 
@@ -536,6 +548,7 @@ AS $BODY$
 					amount,
 					cost_analytics_id,
 					content,
+					advance_id,
 					
 					created
 				) values (
@@ -555,6 +568,7 @@ AS $BODY$
 					_amount,
 					(_row->>'cost_analytics_id')::bigint,
 					_row->>'content',
+					(_row->>'advance_id')::bigint,
 					
 					jsonb_build_object(
 						'user_id', _user_id,
@@ -594,6 +608,7 @@ AS $BODY$
 					amount = _amount,
 					cost_analytics_id = (_row->>'cost_analytics_id')::bigint,
 					content = _row->>'content',
+					advance_id = (_row->>'advance_id')::bigint,
 					
 					created = CASE
     				    WHEN _created_date IS NOT NULL
@@ -631,11 +646,12 @@ $BODY$;
 
 
 select accounting.fetch_staff_debts_for_advance_reports (
-	3674
+	3674, null, null, null
 );
 
 create or replace function accounting.fetch_staff_debts_for_advance_reports (
 	_staff_id bigint,
+	_advance_id bigint default null,
 	_limit integer default 100,
 	_offset integer default 0
 )
@@ -660,6 +676,7 @@ AS $BODY$
 				(created->>'date')::date created_date
 			from accounting.payment_order_outgoing
 			where staff_id = _staff_id
+			and (_advance_id is null or _advance_id = id)
 	
 			union all
 				
@@ -674,6 +691,7 @@ AS $BODY$
 				(created->>'date')::date created_date
 			from accounting.cash_payment_order
 			where staff_id = _staff_id
+			and (_advance_id is null or _advance_id = id)
 		),
 		returnss as (
 			select
@@ -681,6 +699,7 @@ AS $BODY$
 				advance_id
 			from accounting.advance_report_tmzos
 			where staff_id = _staff_id
+			and (_advance_id is null or _advance_id = advance_id)
 	
 			union all
 	
@@ -689,6 +708,7 @@ AS $BODY$
 				advance_id
 			from accounting.advance_report_oplata
 			where staff_id = _staff_id
+			and (_advance_id is null or _advance_id = advance_id)
 	
 			union all
 	
@@ -697,6 +717,7 @@ AS $BODY$
 				advance_id
 			from accounting.advance_report_prochee
 			where staff_id = _staff_id
+			and (_advance_id is null or _advance_id = advance_id)
 		),
 		lefts as (
 			select
@@ -816,6 +837,7 @@ AS $BODY$
 					department_id,
 					staff_id,
 					description,
+					advance_id,
 					(created->>'date')::date created_date
 				from  accounting.advance_report_tmzos
 				where financing = _financing 
@@ -839,6 +861,7 @@ AS $BODY$
 			            	'unit_price', unit_price,
 			            	'quantity', quantity,
 							'debit', debit,
+							'advance_id', advance_id,
 							'ledger_id', ledger_id
 			            ) ORDER BY (created->>'date')::date
 			        ) AS table_data
@@ -864,6 +887,7 @@ AS $BODY$
 					'department_id', department_id,
 					'staff_id', staff_id,
 					'description', description,
+					'advance_id', advance_id,
 					'table_data', table_data,
 					'created_date', created_date
 				) aggregated from main
@@ -885,6 +909,7 @@ AS $BODY$
 					department_id,
 					staff_id,
 					description,
+					advance_id,
 					(created->>'date')::date created_date
 				from  accounting.advance_report_oplata
 				where financing = _financing 
@@ -909,6 +934,7 @@ AS $BODY$
 							'counterparty_id', counterparty_id,
 							'contract_id', contract_id,
 							'contract_text', contract_text,
+							'advance_id', advance_id,
 							'content', content
 			            ) ORDER BY (created->>'date')::date
 			        ) AS table_data
@@ -934,6 +960,7 @@ AS $BODY$
 					'department_id', department_id,
 					'staff_id', staff_id,
 					'description', description,
+					'advance_id', advance_id,
 					'table_data', table_data,
 					'created_date', created_date
 				) aggregated from main
@@ -955,6 +982,7 @@ AS $BODY$
 					department_id,
 					staff_id,
 					description,
+					advance_id,
 					(created->>'date')::date created_date
 				from  accounting.advance_report_prochee
 				where financing = _financing 
@@ -977,6 +1005,7 @@ AS $BODY$
 							'debit', debit,
 							'ledger_id', ledger_id,
 							'cost_analytics_id', cost_analytics_id,
+							'advance_id', advance_id,
 							'content', content
 			            ) ORDER BY (created->>'date')::date
 			        ) AS table_data
@@ -1002,6 +1031,7 @@ AS $BODY$
 					'department_id', department_id,
 					'staff_id', staff_id,
 					'description', description,
+					'advance_id', advance_id,
 					'table_data', table_data,
 					'created_date', created_date
 				) aggregated from main
