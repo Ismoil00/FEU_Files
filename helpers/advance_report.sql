@@ -1,242 +1,8 @@
-/* -------------------------------------- */
--- 	       Advance Report TMZ/OS
-/* -------------------------------------- */
-
-create table if not exists accounting.advance_report_tmzos (
-	operation_number bigint not null,
-	financing accounting.budget_distribution_type not null,
-	credit integer not null default 114610 references accounting.accounts (account),
-	staff_id bigint not null references hr.staff (id),
-	description text,
-
-	/* table part */
-	id bigserial primary key,
-	document_name text not null,
-	document_number integer not null,
-	document_date date not null,
-	name_id bigint not null references commons.nomenclature (id),
-	quantity numeric not null,
-	unit_price numeric not null,
-	debit integer not null references accounting.accounts (account),
-	ledger_id bigint not null references accounting.ledger (id),
-	counterparty text not null,
-	
-	created jsonb not null,
-	updated jsonb not null
-);
-
-
-
-select * from accounting.advance_report_tmzos;
-
-
-
-select * from accounting.ledger
-where id > 123
-order by id;
-
-
-
-create or replace function accounting.upsert_advance_report_tmzos (
-	jdata jsonb
-)
-    RETURNS jsonb
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_operation_number bigint = (jdata->>'operation_number')::bigint;
-		_user_id uuid = (jdata->>'user_id')::uuid;
-		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
-		_staff_id bigint = (jdata->>'staff_id')::bigint;
-		_department_id bigint = (jdata->>'department_id')::bigint;
-		_description text = jdata->>'description';
-		_created_date date = (jdata->>'created_date')::date;
-		isUpdate boolean = false;
-				
-		/* table variables */
-		_row jsonb;
-		_id bigint;
-		_unit_price numeric;
-		_quantity numeric;
-		_ledger_id bigint;
-		_debit integer;
-	BEGIN
-
-		/* GENERATING NEW OPERATION NUMBER */
-		if _operation_number is null then
-			SELECT coalesce(max(sub.operation_number), 0) + 1
-			into _operation_number from (
-				SELECT operation_number
-	        	FROM accounting.advance_report_tmzos
-	        	GROUP BY operation_number
-	        	ORDER BY operation_number DESC
-	        	LIMIT 1
-			) sub;
-		end if;
-
-		FOR _row IN SELECT * FROM jsonb_array_elements((jdata->>'table_data')::jsonb) LOOP
-			_id = (_row->>'id')::bigint;
-			_quantity = (_row->>'quantity')::numeric;
-			_unit_price = (_row->>'unit_price')::numeric;
-			_debit = (_row->>'debit')::int;
-			_ledger_id = (_row->>'ledger_id')::bigint;
-
-			-- insertion
-			if _id is null then
-				/* we fill ledger with the accountingentry */
-				SELECT accounting.upsert_ledger(
-					_financing,
-					_debit,
-					114610,
-					round(_unit_price * _quantity, 2),
-					null,
-					_staff_id,
-					null
-				) INTO _ledger_id;
-
-				select * from accounting.warehouse_incoming
-
-				insert into accounting.advance_report_tmzos (
-					operation_number,
-					financing,
-					department_id,
-					staff_id,
-					description,
-				
-					/* table part */
-					document_name,
-					document_number,
-					document_date,
-					name_id,
-					quantity,
-					unit_price,
-					debit,
-					ledger_id,
-					counterparty,
-					advance_id,
-					
-					created
-				) values (
-					_operation_number,
-					_financing,
-					_department_id,
-					_staff_id,
-					_description,
-				
-					/* table part */
-					_row->>'document_name',
-					(_row->>'document_number')::integer,
-					(_row->>'document_date')::date,
-					(_row->>'name_id')::bigint,
-					_quantity,
-					_unit_price,
-					_debit,
-					_ledger_id,
-					_row->>'counterparty',
-					(_row->>'advance_id')::bigint,
-
-					
-					jsonb_build_object(
-						'user_id', _user_id,
-						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
-					)
-				);
-
-			-- update
-			else
-				isUpdate = true;
-				
-				/* we fill ledger with the accountingentry */
-				SELECT accounting.upsert_ledger(
-					_financing,
-					_debit,
-					114610,
-					round(_unit_price * _quantity, 2),
-					null,
-					_staff_id,
-					_ledger_id
-				) INTO _ledger_id;
-
-				update accounting.advance_report_tmzos art set 
-					operation_number = _operation_number,
-					financing = _financing,
-					department_id = _department_id,
-					staff_id = _staff_id,
-					description = _description,
-				
-					/* table part */
-					document_name = _row->>'document_name',
-					document_number = (_row->>'document_number')::integer,
-					document_date = (_row->>'document_date')::date,
-					name_id = (_row->>'name_id')::bigint,
-					quantity = _quantity,
-					unit_price = _unit_price,
-					debit = _debit,
-					ledger_id = _ledger_id,
-					counterparty = _row->>'counterparty',
-					advance_id = (_row->>'advance_id')::bigint,
-					
-					created = CASE
-    				    WHEN _created_date IS NOT NULL
-    				    THEN jsonb_set(
-    				             art.created,
-    				             '{date}',
-    				             to_jsonb(_created_date)
-    				         )
-    				    ELSE art.created
-    				END,
-					updated = jsonb_build_object(
-						'user_id', _user_id,
-						'date', localtimestamp(0)
-					)
-				where id = _id;
-
-			end if;
-		END LOOP;
-
-		return json_build_object(
-			'msg', case when isUpdate then 'updated' else 'created' end,
-			'operation_number', _operation_number,
-			'status', 200
-		);
-	END;
-$BODY$;
-/* -------------------------------------- */
---------------------------------------------
-/* -------------------------------------- */
-
-
-
-/* -------------------------------------- */
--- 	       Advance Report OPLATA
-/* -------------------------------------- */
-
-create table if not exists accounting.advance_report_oplata (
-	operation_number bigint not null,
-	financing accounting.budget_distribution_type not null,
-	credit integer not null default 114610 references accounting.accounts (account),
-	staff_id bigint not null references hr.staff (id),
-	description text,
-
-	/* table part */
-	id bigserial primary key,
-	document_name text not null,
-	document_number integer not null,
-	document_date date not null,
-	debit integer not null references accounting.accounts (account),
-	ledger_id bigint not null references accounting.ledger (id),
-	
-	amount numeric not null,
-	counterparty_id bigint not null references accounting.counterparty(id),
-	contract_id bigint not null references commons.counterparty_contracts (id),
-	contract_text text,
-	content text,
-	
-	created jsonb not null,
-	updated jsonb not null
-);
+-- eccepted_amount_till_today
+-- total_accepted_amount
+-- total_expenses
+-- left_in_staff_hand_amount = total_accepted_amount - total_expenses > 0
+-- to_staff_owed_amount = total_accepted_amount - total_expenses < 0
 
 
 
@@ -245,875 +11,242 @@ select * from accounting.advance_report_oplata;
 
 
 
-select * from accounting.ledger
-where id > 123
-order by id;
-
-
-
-select * from accounting.product_transfer;
-
-
-
-create or replace function accounting.upsert_advance_report_oplata (
-	jdata jsonb
-)
-    RETURNS jsonb
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_operation_number bigint = (jdata->>'operation_number')::bigint;
-		_user_id uuid = (jdata->>'user_id')::uuid;
-		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
-		_department_id bigint = (jdata->>'department_id')::bigint;
-		_staff_id bigint = (jdata->>'staff_id')::bigint;
-		_description text = jdata->>'description';
-		_created_date date = (jdata->>'created_date')::date;
-		isUpdate boolean = false;
-				
-		/* table variables */
-		_row jsonb;
-		_id bigint;
-		_amount numeric;
-		_ledger_id bigint;
-		_debit integer;
-		_contract_id bigint;
-	BEGIN
-
-		/* GENERATING NEW OPERATION NUMBER */
-		if _operation_number is null then
-			SELECT coalesce(max(sub.operation_number), 0) + 1
-			into _operation_number from (
-				SELECT operation_number
-	        	FROM accounting.advance_report_oplata
-	        	GROUP BY operation_number
-	        	ORDER BY operation_number DESC
-	        	LIMIT 1
-			) sub;
-		end if;
-
-		FOR _row IN SELECT * FROM jsonb_array_elements((jdata->>'table_data')::jsonb) LOOP
-			_id = (_row->>'id')::bigint;
-			_amount = (_row->>'amount')::numeric;
-			_debit = (_row->>'debit')::int;
-			_ledger_id = (_row->>'ledger_id')::bigint;
-			_contract_id = (_row->>'contract_id')::bigint;
-
-			-- insertion
-			if _id is null then
-				/* we fill ledger with the accountingentry */
-				SELECT accounting.upsert_ledger(
-					_financing,
-					_debit,
-					114610,
-					_amount,
-					_contract_id,
-					_staff_id,
-					null
-				) INTO _ledger_id;
-
-				insert into accounting.advance_report_oplata (
-					operation_number,
-					financing,
-					department_id,
-					staff_id,
-					description,
-				
-					/* table part */
-					document_name,
-					document_number,
-					document_date,
-					debit,
-					ledger_id,
-					
-					amount,
-					counterparty_id,
-					contract_id,
-					contract_text,
-					content,
-					advance_id,
-					
-					created
-				) values (
-					_operation_number,
-					_financing,
-					_department_id,
-					_staff_id,
-					_description,
-				
-					/* table part */
-					_row->>'document_name',
-					(_row->>'document_number')::integer,
-					(_row->>'document_date')::date,
-					_debit,
-					_ledger_id,
-
-					_amount,
-					(_row->>'counterparty_id')::bigint,
-					_contract_id,
-					_row->>'contract_text',
-					_row->>'content',
-					(_row->>'advance_id')::bigint,
-					
-					jsonb_build_object(
-						'user_id', _user_id,
-						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
-					)
-				);
-
-			-- update
-			else
-				isUpdate = true;
-				
-				/* we fill ledger with the accountingentry */
-				SELECT accounting.upsert_ledger(
-					_financing,
-					_debit,
-					114610,
-					_amount,
-					_contract_id,
-					_staff_id,
-					_ledger_id
-				) INTO _ledger_id;
-
-				update accounting.advance_report_oplata aro set 
-					operation_number = _operation_number,
-					financing = _financing,
-					department_id = _department_id,
-					staff_id = _staff_id,
-					description = _description,
-				
-					/* table part */
-					document_name = _row->>'document_name',
-					document_number = (_row->>'document_number')::integer,
-					document_date = (_row->>'document_date')::date,
-					debit = _debit,
-					ledger_id = _ledger_id,
-					
-					amount = _amount,
-					counterparty_id = (_row->>'counterparty_id')::bigint,
-					contract_id = _contract_id,
-					contract_text = _row->>'contract_text',
-					content = _row->>'content',
-					advance_id = (_row->>'advance_id')::bigint,
-					
-					created = CASE
-    				    WHEN _created_date IS NOT NULL
-    				    THEN jsonb_set(
-    				             aro.created,
-    				             '{date}',
-    				             to_jsonb(_created_date)
-    				         )
-    				    ELSE aro.created
-    				END,
-					updated = jsonb_build_object(
-						'user_id', _user_id,
-						'date', localtimestamp(0)
-					)
-				where id = _id;
-
-			end if;
-		END LOOP;
-
-		return json_build_object(
-			'msg', case when isUpdate then 'updated' else 'created' end,
-			'operation_number', _operation_number,
-			'status', 200
-		);
-	END;
-$BODY$;
-/* -------------------------------------- */
---------------------------------------------
-/* -------------------------------------- */
-
-
-
-
-
-/* -------------------------------------- */
--- 	       Advance Report PROCHEE
-/* -------------------------------------- */
-
-create table if not exists accounting.advance_report_prochee (
-	operation_number bigint not null,
-	financing accounting.budget_distribution_type not null,
-	credit integer not null default 114610 references accounting.accounts (account),
-	staff_id bigint not null references hr.staff (id),
-	description text,
-
-	/* table part */
-	id bigserial primary key,
-	document_name text not null,
-	document_number integer not null,
-	document_date date not null,
-	debit integer not null references accounting.accounts (account),
-	ledger_id bigint not null references accounting.ledger (id),
-	
-	amount numeric not null,
-	content text,
-	cost_analytics_id bigint references commons.cost_analytics (id),
-	
-	created jsonb not null,
-	updated jsonb not null
-);
-
-
-
-
-
 select * from accounting.advance_report_prochee;
 
 
 
-select * 
-from accounting.ledger
-where id > 123
-order by id;
+select * from accounting.advance_report_tmzos;
 
 
+select * from hr.staff
 
-create or replace function accounting.upsert_advance_report_prochee (
-	jdata jsonb
-)
+
+select accounting.download_advance_report(3674)
+
+
+CREATE OR REPLACE FUNCTION accounting.download_advance_report(_staff_id bigint)
     RETURNS jsonb
     LANGUAGE 'plpgsql'
     COST 100
     VOLATILE PARALLEL UNSAFE
 AS $BODY$
-	DECLARE
-		_operation_number bigint = (jdata->>'operation_number')::bigint;
-		_user_id uuid = (jdata->>'user_id')::uuid;
-		_financing accounting.budget_distribution_type = (jdata->>'financing')::accounting.budget_distribution_type;
-		_department_id bigint = (jdata->>'department_id')::bigint;
-		_staff_id bigint = (jdata->>'staff_id')::bigint;
-		_description text = jdata->>'description';
-		_created_date date = (jdata->>'created_date')::date;
-		isUpdate boolean = false;
-				
-		/* table variables */
-		_row jsonb;
-		_id bigint;
-		_amount numeric;
-		_ledger_id bigint;
-		_debit integer;
-	BEGIN
+DECLARE
+    _result jsonb;
+BEGIN
 
-		/* GENERATING NEW OPERATION NUMBER */
-		if _operation_number is null then
-			SELECT coalesce(max(sub.operation_number), 0) + 1
-			into _operation_number from (
-				SELECT operation_number
-	        	FROM accounting.advance_report_prochee
-	        	GROUP BY operation_number
-	        	ORDER BY operation_number DESC
-	        	LIMIT 1
-			) sub;
-		end if;
-
-		FOR _row IN SELECT * FROM jsonb_array_elements((jdata->>'table_data')::jsonb) LOOP
-			_id = (_row->>'id')::bigint;
-			_amount = (_row->>'amount')::numeric;
-			_debit = (_row->>'debit')::int;
-			_ledger_id = (_row->>'ledger_id')::bigint;
-
-			-- insertion
-			if _id is null then
-				/* we fill ledger with the accountingentry */
-				SELECT accounting.upsert_ledger(
-					_financing,
-					_debit,
-					114610,
-					_amount,
-					null,
-					_staff_id,
-					null
-				) INTO _ledger_id;
-
-				insert into accounting.advance_report_prochee (
-					operation_number,
-					financing,
-					department_id,
-					staff_id,
-					description,
-				
-					/* table part */
-					document_name,
-					document_number,
-					document_date,
-					debit,
-					ledger_id,
-					
-					amount,
-					cost_analytics_id,
-					content,
-					advance_id,
-					
-					created
-				) values (
-					_operation_number,
-					_financing,
-					_department_id,
-					_staff_id,
-					_description,
-				
-					/* table part */
-					_row->>'document_name',
-					(_row->>'document_number')::integer,
-					(_row->>'document_date')::date,
-					_debit,
-					_ledger_id,
-
-					_amount,
-					(_row->>'cost_analytics_id')::bigint,
-					_row->>'content',
-					(_row->>'advance_id')::bigint,
-					
-					jsonb_build_object(
-						'user_id', _user_id,
-						'date', coalesce(_created_date, LOCALTIMESTAMP(0))
-					)
-				);
-
-			-- update
-			else
-				isUpdate = true;
-				
-				/* we fill ledger with the accountingentry */
-				SELECT accounting.upsert_ledger(
-					_financing,
-					_debit,
-					114610,
-					_amount,
-					null,
-					_staff_id,
-					_ledger_id
-				) INTO _ledger_id;
-
-				update accounting.advance_report_prochee arp set 
-					operation_number = _operation_number,
-					financing = _financing,
-					department_id = _department_id,
-					staff_id = _staff_id,
-					description = _description,
-				
-					/* table part */
-					document_name = _row->>'document_name',
-					document_number = (_row->>'document_number')::integer,
-					document_date = (_row->>'document_date')::date,
-					debit = _debit,
-					ledger_id = _ledger_id,
-					
-					amount = _amount,
-					cost_analytics_id = (_row->>'cost_analytics_id')::bigint,
-					content = _row->>'content',
-					advance_id = (_row->>'advance_id')::bigint,
-					
-					created = CASE
-    				    WHEN _created_date IS NOT NULL
-    				    THEN jsonb_set(
-    				             arp.created,
-    				             '{date}',
-    				             to_jsonb(_created_date)
-    				         )
-    				    ELSE arp.created
-    				END,
-					updated = jsonb_build_object(
-						'user_id', _user_id,
-						'date', localtimestamp(0)
-					)
-				where id = _id;
-
-			end if;
-		END LOOP;
-
-		return json_build_object(
-			'msg', case when isUpdate then 'updated' else 'created' end,
-			'operation_number', _operation_number,
-			'status', 200
-		);
-	END;
-$BODY$;
-/* -------------------------------------- */
---------------------------------------------
-/* -------------------------------------- */
-
-
-/* -------------------------------------- */
--- 	     Advance Report Staff Debts
-/* -------------------------------------- */
-
-
-select accounting.fetch_staff_debts_for_advance_reports (
-	3674, null, null, null
-);
-
-create or replace function accounting.fetch_staff_debts_for_advance_reports (
-	_staff_id bigint,
-	_advance_id bigint default null,
-	_limit integer default 100,
-	_offset integer default 0
-)
-RETURNS jsonb
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_result jsonb;
-	BEGIN
-
-		with advances as (
+	with advances as (
 			select
-				'payment_order_outgoing' as "section",
-				financing,
+				staff_id,
 				id,
-				cash_flow_article_id,
+				'bank'::varchar(10) as "section",
 				amount,
-				debit,
-				credit,
-				(created->>'date')::date created_date
+				(created->>'date')::date as created_date
 			from accounting.payment_order_outgoing
 			where staff_id = _staff_id
-			and (_advance_id is null or _advance_id = id)
 	
 			union all
 				
 			select
-				'cash_payment_order' as "section",
-				financing,
+				staff_id,
 				id,
-				cash_flow_article_id,
+				'cash'::varchar(10) as "section",
 				amount,
-				debit,
-				credit,
-				(created->>'date')::date created_date
+				(created->>'date')::date as created_date
 			from accounting.cash_payment_order
 			where staff_id = _staff_id
-			and (_advance_id is null or _advance_id = id)
 		),
 		returnss as (
 			select
+				staff_id,
+				document_name,
+				document_number,
+				document_date,
 				round(quantity * unit_price, 2) as amount,
-				advance_id
+				advance_id,
+				advance_section,
+				credit,
+				debit,
+				description
 			from accounting.advance_report_tmzos
 			where staff_id = _staff_id
-			and (_advance_id is null or _advance_id = advance_id)
 	
 			union all
 	
 			select
+				staff_id,
+				document_name,
+				document_number,
+				document_date,
 				amount,
-				advance_id
+				advance_id,
+				advance_section,
+				credit,
+				debit,
+				description
 			from accounting.advance_report_oplata
 			where staff_id = _staff_id
-			and (_advance_id is null or _advance_id = advance_id)
 	
 			union all
 	
 			select
+				staff_id,
+				document_name,
+				document_number,
+				document_date,
 				amount,
-				advance_id
+				advance_id,
+				advance_section,
+				credit,
+				debit,
+				description
 			from accounting.advance_report_prochee
 			where staff_id = _staff_id
-			and (_advance_id is null or _advance_id = advance_id)
 		),
-		lefts as (
+		filtered as (
 			select
+				a.staff_id,
 				a.id,
 				a."section",
-				a.financing,
-				a.cash_flow_article_id,
-				(a.amount - sum(coalesce(r.amount, 0))) as left_amount,
-				a.debit,
-				a.credit,
-				a.created_date
+				a.amount as eccepted_amount_per_row,
+				sum(coalesce(r.amount, 0)) as spent_amount_per_row,
+				a.created_date,
+				jsonb_agg(
+					jsonb_build_object(
+						'doc_name', r.document_name,
+						'doc_numb', r.document_number,
+						'doc_date', r.document_date,
+						'amount', r.amount,
+						'credit', r.credit,
+						'debit', r.debit,
+						'description', r.description
+					)
+				) as aggregateds
 			from advances a
 			left join returnss r
-				on a.id = r.advance_id
-			group by a.id,
-				a."section",
-				a.financing,
-				a.cash_flow_article_id,
-				a.amount,
-				a.debit,
-				a.credit,
-				a.created_date
+				on a.staff_id = r.staff_id
+				and a.id = r.advance_id
+				and a.section = r.advance_section
+			group by a.staff_id, a.id, a."section", a.amount, a.created_date
+			having a.amount - sum(coalesce(r.amount, 0)) != 0
 		),
-		table_total as (
-			select count(*) as total from lefts
+		reaggregateds as (
+		    select
+		        staff_id,
+		        jsonb_agg(elem) as aggregateds
+		    from (
+		        select 
+		            staff_id,
+		            jsonb_array_elements(aggregateds) as elem
+		        from filtered
+		    ) unnested
+		    group by staff_id
 		),
-		paginated as (
-			select jsonb_build_object(
-				'key', row_number() over(order by created_date),
-				'id', id,
-				'section', "section",
-				'financing', financing,
-				'cash_flow_article_id', cash_flow_article_id,
-				'left_amount', left_amount,
-				'debit', debit,
-				'credit', credit,
-				'created_date', created_date
-			) as aggregated from lefts
-			order by created_date
-			limit _limit offset _offset
-		) select jsonb_build_object (
-			'status', 200,
-			'results', jsonb_agg(p.aggregated),
-			'total', (select total from table_total)
-		) into _result from paginated p;
-
-		return _result;
-	END;
-$BODY$;
-/* -------------------------------------- */
---------------------------------------------
-/* -------------------------------------- */
-
-create or replace function accounting.upsert_advance_report (
-	_advance_type accounting.advance_type,
-	jdata jsonb
-)
-    RETURNS jsonb
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE
-		_result jsonb;
-	BEGIN
-
-		if _advance_type = 'tmz' then
-			SELECT accounting.upsert_advance_report_tmzos (jdata)
-			INTO _result;
-			
-		elsif _advance_type = 'oplata' then
-			SELECT accounting.upsert_advance_report_oplata (jdata)
-			INTO _result;
-			
-		elsif _advance_type = 'prochee' then
-			SELECT accounting.upsert_advance_report_prochee (jdata)
-			INTO _result;
-			
-		end if;
-
-		return _result;
-	END;
-$BODY$;
-
-
-
-
-select accounting.get_advance_report();
-
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.get_advance_report(
-	_financing accounting.budget_distribution_type,
-	_advance_type accounting.advance_type,
-	_date_from text DEFAULT NULL::text,
-	_date_to text DEFAULT NULL::text,
-	_staff_id bigint DEFAULT NULL::bigint,
-	_limit integer DEFAULT 1000,
-	_offset integer DEFAULT 0)
-    RETURNS json
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE	
-		_result json;
-	BEGIN
-
-		/* -------------------- tmz -------------------- */
-		if _advance_type = 'tmz' then
-			with main_parent as (
-				select DISTINCT ON (operation_number)
-					operation_number,
-					financing,
-					department_id,
+		till_todays as (
+			select
+				staff_id,
+				case
+					when sum(eccepted_amount_per_row) - sum(spent_amount_per_row) > 0
+					then 'eccepted_amount_till_today'
+					else 'left_amount_till_today'
+				end as col_name,
+				abs(sum(eccepted_amount_per_row) - sum(spent_amount_per_row)) as amount
+			from filtered
+			where created_date < current_date
+			group by staff_id
+		),
+		todays as (
+			select
+				staff_id,
+				jsonb_agg(
+					jsonb_build_object (
+						'today_expense_amount', eccepted_amount_per_row,
+						'today_expense_name', case
+							when section = 'cash'
+							then 'РКО № ' || id || ' от ' || created_date 
+							when section = 'bank'
+							then 'ППИ № ' || id || ' от ' || created_date
+						end
+					) order by created_date
+				) as todays_expenses
+			from filtered
+			where created_date >= current_date
+			group by staff_id
+		),
+		totals as (
+			select
+				staff_id,
+				sum(spent_amount_per_row) as total_expenses,
+				sum(eccepted_amount_per_row) as total_accepted_amount,
+				case
+					when sum(eccepted_amount_per_row) - sum(spent_amount_per_row) > 0
+					then 'left_in_staff_hand_amount'
+					else 'to_staff_owed_amount'
+				end as col_name,
+				abs(sum(eccepted_amount_per_row) - sum(spent_amount_per_row)) as amount
+			from filtered
+			group by staff_id
+		)
+		select jsonb_build_object (
+			'organization', (
+				select department->>'tj'
+				from commons.department
+				where id = 12
+			),
+			'created_date', current_date,
+			'operation_number', t.staff_id,
+			'head', 'Рачабзода Шариф Рачаб',
+			'staff_jobtitle', s.staff_jobtitle,
+			'staff_department', s.staff_department,
+			'total_expenses', t.total_expenses,
+			'total_accepted_amount', t.total_accepted_amount,
+			t.col_name, t.amount,
+			'table_data', rag.aggregateds,
+			tt.col_name, tt.amount,
+			'todays_expenses', td.todays_expenses
+		) into _result
+		from totals t
+		left join reaggregateds rag
+			using (staff_id)
+		left join till_todays tt
+			using (staff_id)
+		left join todays td
+			using (staff_id)
+		left join (
+			SELECT
+				m.staff_id,
+				(
+					select jobtitle->>'tj'
+					from commons.jobtitle
+					where id = m.jobtitle_id
+				) as staff_jobtitle,
+				(
+					select department->>'tj'
+					from commons.department
+					where id = m.department_id
+				) as staff_department
+			FROM (
+				SELECT 
 					staff_id,
-					description,
-					advance_id,
-					(created->>'date')::date created_date
-				from  accounting.advance_report_tmzos
-				where financing = _financing 
-				and (_date_from is null or _date_from::date <= (created->>'date')::date)
-				and (_date_to is null or _date_to::date >= (created->>'date')::date)
-				and (_staff_id is null or _staff_id = staff_id)
-				ORDER BY operation_number, id
-			),
-			main_child as (
-				SELECT 
-			        operation_number,
-			        jsonb_agg(
-			            jsonb_build_object(
-			                'id', id,
-			                'key', id,
-							'document_name', document_name,
-			            	'document_number', document_number,
-			            	'document_date', document_date,
-			            	'counterparty', counterparty,
-			            	'name_id', name_id,
-			            	'unit_price', unit_price,
-			            	'quantity', quantity,
-							'debit', debit,
-							'advance_id', advance_id,
-							'ledger_id', ledger_id
-			            ) ORDER BY (created->>'date')::date
-			        ) AS table_data
-			    FROM accounting.advance_report_tmzos
-			    GROUP BY operation_number
-			),
-			main as (
-				SELECT 
-				    p.*,
-				    c.table_data
-				FROM main_parent p
-				JOIN main_child c 
-				USING (operation_number)
-			),
-			total_count as (
-				select count(*) total from main
-			),
-			paginated as (
-				select jsonb_build_object(
-					'key', row_number() over(order by created_date),
-					'operation_number', operation_number,
-					'financing', financing,
-					'department_id', department_id,
-					'staff_id', staff_id,
-					'description', description,
-					'advance_id', advance_id,
-					'table_data', table_data,
-					'created_date', created_date
-				) aggregated from main
-				order by created_date 
-				limit _limit offset _offset
-			)
-			select jsonb_build_object(
-				'results', jsonb_agg(p.aggregated),
-				'total', (select total from total_count),
-				'status', 200
-			) into _result from paginated p;
-
-		/* -------------------- oplata -------------------- */
-		elsif _advance_type = 'oplata' then
-			with main_parent as (
-				select DISTINCT ON (operation_number)
-					operation_number,
-					financing,
 					department_id,
-					staff_id,
-					description,
-					advance_id,
-					(created->>'date')::date created_date
-				from  accounting.advance_report_oplata
-				where financing = _financing 
-				and (_date_from is null or _date_from::date <= (created->>'date')::date)
-				and (_date_to is null or _date_to::date >= (created->>'date')::date)
-				and (_staff_id is null or _staff_id = staff_id)
-				ORDER BY operation_number, id
-			),
-			main_child as (
-				SELECT 
-			        operation_number,
-			        jsonb_agg(
-			            jsonb_build_object(
-			                'id', id,
-							'key', id,
-			            	'document_name', document_name,
-			            	'document_number', document_number,
-			            	'document_date', document_date,
-			            	'amount', amount,
-							'debit', debit,
-							'ledger_id', ledger_id,
-							'counterparty_id', counterparty_id,
-							'contract_id', contract_id,
-							'contract_text', contract_text,
-							'advance_id', advance_id,
-							'content', content
-			            ) ORDER BY (created->>'date')::date
-			        ) AS table_data
-			   FROM accounting.advance_report_oplata
-			   GROUP BY operation_number
-			),
-			main as (
-				SELECT 
-				    p.*,
-				    c.table_data
-				FROM main_parent p
-				JOIN main_child c 
-				USING (operation_number)
-			),
-			total_count as (
-				select count(*) total from main
-			),
-			paginated as (
-				select jsonb_build_object(
-					'key', row_number() over(order by created_date),
-					'operation_number', operation_number,
-					'financing', financing,
-					'department_id', department_id,
-					'staff_id', staff_id,
-					'description', description,
-					'advance_id', advance_id,
-					'table_data', table_data,
-					'created_date', created_date
-				) aggregated from main
-				order by created_date 
-				limit _limit offset _offset
-			)
-			select jsonb_build_object(
-				'results', jsonb_agg(p.aggregated),
-				'total', (select total from total_count),
-				'status', 200
-			) into _result from paginated p;
-
-		/* -------------------- prochee -------------------- */
-		elsif _advance_type = 'prochee' then
-			with main_parent as (
-				select DISTINCT ON (operation_number)
-					operation_number,
-					financing,
-					department_id,
-					staff_id,
-					description,
-					advance_id,
-					(created->>'date')::date created_date
-				from  accounting.advance_report_prochee
-				where financing = _financing 
-				and (_date_from is null or _date_from::date <= (created->>'date')::date)
-				and (_date_to is null or _date_to::date >= (created->>'date')::date)
-				and (_staff_id is null or _staff_id = staff_id)
-				ORDER BY operation_number, id
-			),
-			main_child as (
-				SELECT 
-			        operation_number,
-			        jsonb_agg(
-			            jsonb_build_object(
-			                'id', id,
-							'key', id,
-			            	'document_name', document_name,
-			            	'document_number', document_number,
-			            	'document_date', document_date,
-			            	'amount', amount,
-							'debit', debit,
-							'ledger_id', ledger_id,
-							'cost_analytics_id', cost_analytics_id,
-							'advance_id', advance_id,
-							'content', content
-			            ) ORDER BY (created->>'date')::date
-			        ) AS table_data
-			   FROM accounting.advance_report_prochee
-			   GROUP BY operation_number
-			),
-			main as (
-				SELECT 
-				    p.*,
-				    c.table_data
-				FROM main_parent p
-				JOIN main_child c 
-				USING (operation_number)
-			),
-			total_count as (
-				select count(*) total from main
-			),
-			paginated as (
-				select jsonb_build_object(
-					'key', row_number() over(order by created_date),
-					'operation_number', operation_number,
-					'financing', financing,
-					'department_id', department_id,
-					'staff_id', staff_id,
-					'description', description,
-					'advance_id', advance_id,
-					'table_data', table_data,
-					'created_date', created_date
-				) aggregated from main
-				order by created_date 
-				limit _limit offset _offset
-			)
-			select jsonb_build_object(
-				'results', jsonb_agg(p.aggregated),
-				'total', (select total from total_count),
-				'status', 200
-			) into _result from paginated p;
-			
-		end if;
-
-		return _result;
-	end;
-$BODY$;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-select accounting.get_advance_report_report_number(
-
-);
-
-
-
-
-
-
-CREATE OR REPLACE FUNCTION accounting.get_advance_report_id(
-	_advance_type accounting.advance_type
-)
-    RETURNS bigint
-    LANGUAGE 'plpgsql'
-    COST 100
-    VOLATILE PARALLEL UNSAFE
-AS $BODY$
-	DECLARE	
-		_last_id bigint;
-	BEGIN
-
-
-		if _advance_type = 'tmz' then
-			select operation_number
-			into _last_id
-			from accounting.advance_report_tmzos
-			group by operation_number
-			order by operation_number desc
-			limit 1;
-			
-		elsif _advance_type = 'oplata' then
-			select operation_number
-			into _last_id
-			from accounting.advance_report_oplata
-			group by operation_number
-			order by operation_number desc
-			limit 1;
-			
-		elsif _advance_type = 'prochee' then
-			select operation_number
-			into _last_id
-			from accounting.advance_report_prochee
-			group by operation_number
-			order by operation_number desc
-			limit 1;
-			
-		end if;
+					jobtitle_id,
+					ROW_NUMBER() OVER (
+						PARTITION BY staff_id
+						ORDER BY 
+							CASE 
+								WHEN end_date IS NULL THEN 1 
+								ELSE 2 
+							END, 
+							end_date DESC
+					) AS row_rank
+				FROM hr.jobposition
+				WHERE disabled IS NULL
+			) m WHERE m.row_rank = 1
+		) s on t.staff_id = s.staff_id;
 		
-		return _last_id;
-	end;
+    	RETURN _result;
+	END;
 $BODY$;
+
+
+
 
