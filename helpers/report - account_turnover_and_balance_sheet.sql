@@ -1,8 +1,6 @@
 
 
 
-drop function reports.get_account_turnover_and_balance_sheet
-
 
 
 CREATE INDEX idx_ledger_budget_debit_active
@@ -17,6 +15,23 @@ CREATE INDEX idx_ledger_contract_active
 ON accounting.ledger (contract_id)
 WHERE contract_id IS NOT NULL;
 
+
+select *
+from accounting.ledger l
+join accounting.accounts a
+	on a.account = l.debit 
+	or a.account = l.credit
+where related_selector is null
+
+
+select reports.get_account_turnover_and_balance_sheet(
+	'budget',
+	111100,
+	'2026-01-01',
+	'2026-03-03',
+	1000,
+	0
+)
 
 
 CREATE OR REPLACE FUNCTION reports.get_account_turnover_and_balance_sheet(
@@ -34,6 +49,7 @@ CREATE OR REPLACE FUNCTION reports.get_account_turnover_and_balance_sheet(
 AS $BODY$
 DECLARE
 	_related_selector varchar(100);
+	_result jsonb;
 BEGIN
 
 	/* WE DEFINE WHAT TYPE IS THE ACCOUNT */
@@ -93,7 +109,70 @@ BEGIN
 			);
 	 	
 	 else
-	 
+		/* LEFT CASES */
+		with main as (
+		 	select
+				case when _account = l.debit then l.debit else l.credit end as account,
+				case when _account = l.debit then l.amount else 0 end as debit,
+				case when _account = l.credit then l.amount else 0 end as credit,
+				l.created_date::date
+			from accounting.ledger l
+			where l.draft is not true
+			and l.financing = _financing
+			and (l.debit = _account or l.credit = _account)
+		),
+		account_agg as (
+			select 
+				account,
+	
+				-- mid period
+				sum(debit) filter (
+					where created_date between _date_from and _date_to
+				) as debit_amount,
+				sum(credit) filter (
+					where created_date between _date_from and _date_to
+				) as credit_amount,
+	
+				-- start saldo
+			    sum(debit) filter (
+			        where created_date < _date_from
+			    ) -
+			    sum(credit) filter (
+			        where created_date < _date_from
+			    ) as start_balance,
+	
+				-- end saldo
+		        sum(debit) filter (
+		            where created_date <= _date_to
+		        ) -
+		        sum(credit) filter (
+		            where created_date <= _date_to
+		        ) as end_balance
+			from main
+			group by account
+		)
+		-- final packing
+		select jsonb_build_object(
+			'status', 200,
+			'type', 'estimates',
+			'account_data', jsonb_build_object(
+		        'account', account,
+		        'debit_amount', coalesce(debit_amount, 0),
+		        'credit_amount', coalesce(credit_amount, 0),
+		        case when start_balance > 0
+		            then 'prev_saldo_debit'
+		            else 'prev_saldo_credit'
+		        end,
+		        abs(coalesce(start_balance, 0)),
+		        case when end_balance > 0
+		            then 'next_saldo_debit'
+		            else 'next_saldo_credit'
+		        end,
+		        abs(coalesce(end_balance, 0))
+		    )
+		) into _result from account_agg;
+
+	 	RETURN _result;
 	 end if;
 end;
 $BODY$;
@@ -114,7 +193,7 @@ $BODY$;
 /* ESTIMATES */
 
 select * from accounting.ledger l
-where staff_id is not null
+where id = 1954
 
 select reports.account_turnover_and_balance_sheet_estimates (
 	'budget',
@@ -125,11 +204,11 @@ select reports.account_turnover_and_balance_sheet_estimates (
 	0
 );
 
-select * from accounting.manual_operations
+select ledger_id, estimate_id from accounting.manual_operations
 
-select * from accounting.payment_order_outgoing
+select ledger_id, estimate_id from accounting.payment_order_outgoing
 
-select * from accounting.cash_payment_order
+select ledger_id, estimate_id from accounting.cash_payment_order
 
 select * from accounting.estimates
 
@@ -158,24 +237,22 @@ BEGIN
 			case when _account = l.debit then l.debit else l.credit end as account,
 			case when _account = l.debit then l.amount else 0 end as debit,
 			case when _account = l.credit then l.amount else 0 end as credit,
-			coalesce(wi.name_id, wo.name_id, pt.name_id, art.name_id) as name_id,
-			n.name,
+			coalesce(mo.estimate_id, poo.estimate_id, cpo.estimate_id) as estimate_id,
+			e.name,
 			l.created_date::date
 		from accounting.ledger l
-		left join accounting.warehouse_incoming wi
-			on l.id = wi.ledger_id
-		left join accounting.warehouse_outgoing wo
-			on l.id = wo.ledger_id
-		left join accounting.product_transfer pt
-			on l.id = pt.ledger_id
-		left join accounting.advance_report_tmzos art
-			on l.id = art.ledger_id
-		left join commons.nomenclature n
-			on n.id = coalesce(wi.name_id, wo.name_id, pt.name_id, art.name_id)
+		left join accounting.manual_operations mo
+			on l.id = mo.ledger_id
+		left join accounting.payment_order_outgoing poo
+			on l.id = poo.ledger_id
+		left join accounting.cash_payment_order cpo
+			on l.id = cpo.ledger_id
+		left join accounting.estimates e
+			on e.id = coalesce(mo.estimate_id, poo.estimate_id, cpo.estimate_id)
 		where l.draft is not true
 		and l.financing = _financing
 		and (l.debit = _account or l.credit = _account)
-		and coalesce(wi.name_id, wo.name_id, pt.name_id, art.name_id) is not null
+		and coalesce(mo.estimate_id, poo.estimate_id, cpo.estimate_id) is not null
 	),
 	-- account
 	account_agg as (
@@ -234,7 +311,7 @@ BEGIN
 	content_agg as (
 	    select
 	        account,
-	        name_id,
+	        estimate_id,
 	        name,
 
 			-- main period
@@ -261,7 +338,7 @@ BEGIN
 	            where created_date <= _date_to
 	        ) as end_balance
 	    from main
-	    group by account, name_id, name
+	    group by account, estimate_id, name
 	),
 	content_count as (
 	    select count(*) as total_count
@@ -278,7 +355,7 @@ BEGIN
 	    select
 	        jsonb_agg(
 	            jsonb_build_object(
-	                'id', name_id,
+	                'id', estimate_id,
 	                'name', name,
 	                'debit_amount', coalesce(debit_amount, 0),
 	                'credit_amount', coalesce(credit_amount, 0),
@@ -301,7 +378,7 @@ BEGIN
 	-- final packing
 	select jsonb_build_object(
 		'status', 200,
-		'type', 'products',
+		'type', 'estimates',
 		'total_count', (select total_count from content_count),
 		'content_data', (
 			select content_data from content_combined
