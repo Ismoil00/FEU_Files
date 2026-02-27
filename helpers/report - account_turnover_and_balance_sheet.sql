@@ -1,6 +1,16 @@
 
+select * from accounting.accounts a
+join accounting.ledger l on a.account = l.debit
+-- where a.related_selector is null
+where a.related_selector = 'estimates';
 
 
+select *
+from accounting.ledger l
+join accounting.accounts a
+	on a.account = l.debit 
+	-- or a.account = l.credit
+where related_selector is null;
 
 
 CREATE INDEX idx_ledger_budget_debit_active
@@ -14,14 +24,6 @@ WHERE draft IS NOT TRUE AND financing = 'budget';
 CREATE INDEX idx_ledger_contract_active
 ON accounting.ledger (contract_id)
 WHERE contract_id IS NOT NULL;
-
-
-select *
-from accounting.ledger l
-join accounting.accounts a
-	on a.account = l.debit 
-	or a.account = l.credit
-where related_selector is null
 
 
 select reports.get_account_turnover_and_balance_sheet(
@@ -109,7 +111,41 @@ BEGIN
 			);
 	 	
 	 else
-		/* LEFT CASES */
+	 	return reports.account_turnover_and_balance_sheet_not_content (
+				_financing,
+				_account,
+				_date_from,
+				_date_to,
+				_limit,
+				_offset
+			);
+		
+	 end if;
+end;
+$BODY$;
+
+
+
+
+/* NOT ANY CONTENT */
+CREATE OR REPLACE FUNCTION reports.account_turnover_and_balance_sheet_not_content (
+	_financing accounting.budget_distribution_type,
+	_account integer,
+	_date_from date,
+	_date_to date,
+	_limit integer DEFAULT 1000,
+	_offset integer DEFAULT 0
+)
+    RETURNS json
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE PARALLEL UNSAFE
+AS $BODY$
+DECLARE	
+	_result jsonb;
+BEGIN
+
+	/* MAIN QUERY */
 		with main as (
 		 	select
 				case when _account = l.debit then l.debit else l.credit end as account,
@@ -154,7 +190,12 @@ BEGIN
 		-- final packing
 		select jsonb_build_object(
 			'status', 200,
-			'type', 'estimates',
+			'type', 'account',
+			'department', (
+				select department 
+				from commons.department
+				where id = 12
+			),
 			'account_data', jsonb_build_object(
 		        'account', account,
 		        'debit_amount', coalesce(debit_amount, 0),
@@ -172,14 +213,9 @@ BEGIN
 		    )
 		) into _result from account_agg;
 
-	 	RETURN _result;
-	 end if;
+	 return _result;
 end;
 $BODY$;
-
-
-
-
 
 
 
@@ -379,6 +415,11 @@ BEGIN
 	select jsonb_build_object(
 		'status', 200,
 		'type', 'estimates',
+		'department', (
+			select department 
+			from commons.department
+			where id = 12
+		),
 		'total_count', (select total_count from content_count),
 		'content_data', (
 			select content_data from content_combined
@@ -604,6 +645,11 @@ BEGIN
 	select jsonb_build_object(
 		'status', 200,
 		'type', 'products',
+		'department', (
+			select department 
+			from commons.department
+			where id = 12
+		),
 		'total_count', (select total_count from content_count),
 		'content_data', (
 			select content_data from content_combined
@@ -783,7 +829,7 @@ BEGIN
 	        jsonb_agg(
 	            jsonb_build_object(
 	                'id', staff_id,
-	                'fullname', fullname,
+	                'name', fullname,
 	                'debit_amount', coalesce(debit_amount, 0),
 	                'credit_amount', coalesce(credit_amount, 0),
 	
@@ -806,6 +852,11 @@ BEGIN
 	select jsonb_build_object(
 		'status', 200,
 		'type', 'staff',
+		'department', (
+			select department 
+			from commons.department
+			where id = 12
+		),
 		'total_count', (select total_count from content_count),
 		'content_data', (
 			select content_data from content_combined
@@ -1091,6 +1142,11 @@ BEGIN
 	select jsonb_build_object(
 		'status', 200,
 		'type', 'counterparty_contract',
+		'department', (
+			select department 
+			from commons.department
+			where id = 12
+		),
 		'total_count', (select total_count from counterparty_count),
 		'content_data', (
 			select counterparties from counterparty_grouped
@@ -1098,7 +1154,7 @@ BEGIN
 		'account_data', (
 			select account_data from account_combined
 		)
-	);
+	) into _result;
 
 	 return _result;
 end;
@@ -1310,6 +1366,11 @@ BEGIN
 	select jsonb_build_object(
 		'status', 200,
 		'type', 'cash_flow_article',
+		'department', (
+			select department 
+			from commons.department
+			where id = 12
+		),
 		'total_count', (select total_count from content_count),
 		'content_data', (
 			select content_data from content_combined
