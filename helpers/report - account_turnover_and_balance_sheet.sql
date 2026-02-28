@@ -713,9 +713,9 @@ BEGIN
 	/* MAIN QUERY */
 	with main as (
 	 	select
-			case when 211510 = l.debit then l.debit else l.credit end as account,
-			case when 211510 = l.debit then l.amount else 0 end as debit,
-			case when 211510 = l.credit then l.amount else 0 end as credit,
+			case when _account = l.debit then l.debit else l.credit end as account,
+			case when _account = l.debit then l.amount else 0 end as debit,
+			case when _account = l.credit then l.amount else 0 end as credit,
 			l.staff_id,
 			concat_ws(' ', s.lastname, s.firstname, s.middlename) as fullname,
 			l.created_date::date
