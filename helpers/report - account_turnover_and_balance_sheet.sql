@@ -51,7 +51,6 @@ CREATE OR REPLACE FUNCTION reports.get_account_turnover_and_balance_sheet(
 AS $BODY$
 DECLARE
 	_related_selector varchar(100);
-	_result jsonb;
 BEGIN
 
 	/* WE DEFINE WHAT TYPE IS THE ACCOUNT */
@@ -895,6 +894,21 @@ $BODY$;
 /* COUNTERPARTT -> CONTRACT */
 select * from commons.counterparty_contracts
 
+
+select * from accounting.ledger l
+join accounting.accounts a
+	on l.debit = a.account
+where a.related_selector = 'counterparty_contract'
+
+
+select reports.account_turnover_and_balance_sheet_counterparty_contract (
+	'budget',
+	211110,
+	'2026-01-01',
+	'2026-03-03',
+	1000,
+	0
+)
 
 CREATE OR REPLACE FUNCTION reports.account_turnover_and_balance_sheet_counterparty_contract(
 	_financing accounting.budget_distribution_type,

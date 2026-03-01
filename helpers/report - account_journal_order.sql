@@ -17,7 +17,6 @@ CREATE OR REPLACE FUNCTION reports.get_account_order_journal (
 AS $BODY$
 DECLARE
     _related_selector varchar(100);
-	_result jsonb;
 BEGIN
 	
 	/* WE DEFINE WHAT TYPE IS THE ACCOUNT */
@@ -87,8 +86,6 @@ BEGIN
 			);
 		
 	end if;
-	
-	RETURN _result;
 END;
 $BODY$;
 
@@ -121,6 +118,21 @@ $BODY$;
 	 	 NO CONTENT
   ========================
 */
+
+select * from accounting.ledger l
+join accounting.accounts a
+	on a.account = l.debit
+where a.related_selector = 'staff'
+
+select reports.account_order_journal_not_content (
+	'budget',
+	111100,
+	'2026-01-01',
+	'2026-03-03',
+	1000,
+	0
+)
+
 CREATE OR REPLACE FUNCTION reports.account_order_journal_not_content(
 	_financing accounting.budget_distribution_type,
 	_account integer,
@@ -268,8 +280,7 @@ BEGIN
 		'account_data', (
 			SELECT account_data 
 			FROM account_combined
-		),
-		'content_data', '[]'::jsonb
+		)
 	) INTO _result;
 
 	RETURN _result;
@@ -582,7 +593,7 @@ BEGIN
 			), 
 			'[]'::jsonb
 		)
-	);
+	) into _result;
 
 	RETURN _result;
 END;
@@ -898,7 +909,7 @@ BEGIN
 			), 
 			'[]'::jsonb
 		)
-	);
+	) into _result;
 
 	RETURN _result;
 END;
@@ -930,7 +941,26 @@ $BODY$;
 	 	 PRODUCTS
   ========================
 */
-CREATE OR REPLACE FUNCTION reports.account_order_journal_products(
+
+
+select reports.account_order_journal_products(
+	'budget',
+	131230,
+	'2026-01-01',
+	'2026-03-03',
+	1000,
+	0
+)
+
+
+select * from accounting.ledger l
+join accounting.accounts a
+	on a.account = l.debit
+where a.related_selector = 'cash_flow_article'
+
+
+
+CREATE OR REPLACE FUNCTION reports.account_order_journal_products (
 	_financing accounting.budget_distribution_type,
 	_account integer,
 	_date_from date,
@@ -1224,7 +1254,7 @@ BEGIN
 			), 
 			'[]'::jsonb
 		)
-	);
+	) into _result;
 
 	RETURN _result;
 END;
@@ -1561,7 +1591,7 @@ BEGIN
 			), 
 			'[]'::jsonb
 		)
-	);
+	) into _result;
 
 	RETURN _result;
 END;
@@ -1598,7 +1628,7 @@ $BODY$;
 select * from accounting.accounts a
 left join accounting.ledger l
 	on a.account = l.debit
-where related_selector = 'counterparty_contract'
+where related_selector = ''
 
 SELECT reports.account_order_journal_counterparty_contract (
 	'budget',
