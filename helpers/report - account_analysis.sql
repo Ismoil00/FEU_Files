@@ -115,7 +115,7 @@ $BODY$;
 select * from accounting.ledger l
 join accounting.accounts a
 	on l.debit = a.account
-where related_selector = 'staff';
+where related_selector = 'cash_flow_article';
 
 select * from payments.payroll_sheet_line
 
