@@ -692,6 +692,10 @@ select reports.account_turnover_and_balance_sheet_staff (
 
 
 
+select * from payments.payroll_sheet_line;
+
+
+
 CREATE OR REPLACE FUNCTION reports.account_turnover_and_balance_sheet_staff (
 	_financing accounting.budget_distribution_type,
 	_account integer,
@@ -715,16 +719,26 @@ BEGIN
 			case when _account = l.debit then l.debit else l.credit end as account,
 			case when _account = l.debit then l.amount else 0 end as debit,
 			case when _account = l.credit then l.amount else 0 end as credit,
-			l.staff_id,
-			concat_ws(' ', s.lastname, s.firstname, s.middlename) as fullname,
+			coalesce(s.id, p.staff_id) staff_id,
+			case
+				when s.id is not null 
+				then concat_ws(' ', s.lastname, s.firstname, s.middlename)
+				else (
+					select concat_ws(' ', s.lastname, s.firstname, s.middlename)
+					from hr.staff s
+					where s.id = p.staff_id
+				)
+			end as fullname,
 			l.created_date::date
 		from accounting.ledger l
-		join hr.staff s
-			on l.staff_id = s.id
+		LEFT JOIN hr.staff s 
+			ON l.staff_id = s.id
+		LEFT JOIN payments.payroll_sheet_line p 
+			ON l.payroll_sheet_line_id = p.id
 		where l.draft is not true
-		and l.financing = _financing
-		and (l.debit = _account or l.credit = _account)
-		and staff_id is not null
+		AND l.financing = _financing
+		AND (l.debit = _account or l.credit = _account)
+		AND (s.id IS NOT NULL or p.id is not null)
 	),
 	-- account
 	account_agg as (

@@ -124,7 +124,7 @@ select reports.account_analysis_products (
 	131230,
 	'2026-01-01',
 	'2026-03-03',
-	true,
+	false,
 	1000,
 	0
 );
@@ -414,8 +414,6 @@ BEGIN
 				on l.id = pt.ledger_id
 			left join accounting.advance_report_tmzos art
 				on l.id = art.ledger_id
-			left join commons.nomenclature n
-				on n.id = coalesce(wi.name_id, wo.name_id, pt.name_id, art.name_id)
 			WHERE l.draft IS NOT TRUE
 			  AND l.financing = _financing
 			  AND (l.debit = _account OR l.credit = _account)
@@ -728,8 +726,6 @@ BEGIN
 			on l.id = poo.ledger_id
 		left join accounting.cash_payment_order cpo
 			on l.id = cpo.ledger_id
-		left join accounting.estimates e
-			on e.id = coalesce(mo.estimate_id, poo.estimate_id, cpo.estimate_id)
 		WHERE l.draft IS NOT TRUE
 		  AND l.financing = _financing
 		  AND (l.debit = _account OR l.credit = _account)
@@ -1078,16 +1074,6 @@ BEGIN
 			CASE WHEN l.credit = _account THEN round(l.amount, 4) ELSE 0 END AS credit,
 			l.created_date::date AS created_date
 		FROM accounting.ledger l
-		JOIN (
-			SELECT
-				cc.id,
-				cc.contract AS contract_name,
-				cc.counterparty_id,
-				c.name AS counterparty_name
-			FROM commons.counterparty_contracts cc
-			JOIN accounting.counterparty c
-				ON cc.counterparty_id = c.id
-		) cc ON l.contract_id = cc.id
 		WHERE l.draft IS NOT TRUE
 		  AND l.financing = _financing
 		  AND (l.debit = _account OR l.credit = _account)
@@ -1261,13 +1247,6 @@ BEGIN
 			on l.id = cpo.ledger_id
 		left join accounting.cash_receipt_order cro
 			on l.id = cro.ledger_id
-		left join commons.accouting_cash_flow_articles cfa
-			on cfa.id = coalesce(
-				por.cash_flow_article_id,
-				pou.cash_flow_article_id,
-				cpo.cash_flow_article_id,
-				cro.cash_flow_article_id
-			)
 		WHERE l.draft IS NOT TRUE
 		  AND l.financing = _financing
 		  AND (l.debit = _account OR l.credit = _account)

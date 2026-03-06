@@ -333,15 +333,28 @@ BEGIN
 			CASE WHEN l.debit = _account THEN l.credit ELSE l.debit END AS secondary_account,
 			CASE WHEN l.debit = _account THEN round(l.amount, 4) ELSE 0 END AS debit,
 			CASE WHEN l.credit = _account THEN round(l.amount, 4) ELSE 0 END AS credit,
-			l.staff_id,
-			concat_ws(' ', s.lastname, s.firstname, s.middlename) AS fullname,
+			
+			coalesce(s.id, p.staff_id) as staff_id,
+			case
+				when s.id is not null 
+				then concat_ws(' ', s.lastname, s.firstname, s.middlename)
+				else (
+					select concat_ws(' ', s.lastname, s.firstname, s.middlename)
+					from hr.staff s
+					where s.id = p.staff_id
+				)
+			end as fullname,
+			
 			l.created_date::date AS created_date
 		FROM accounting.ledger l
-		JOIN hr.staff s ON l.staff_id = s.id
+		LEFT JOIN hr.staff s 
+			ON l.staff_id = s.id
+		LEFT JOIN payments.payroll_sheet_line p 
+			ON l.payroll_sheet_line_id = p.id
 		WHERE l.draft IS NOT TRUE
 		  AND l.financing = _financing
 		  AND (l.debit = _account OR l.credit = _account)
-		  AND l.staff_id IS NOT NULL
+		  AND (s.id IS NOT NULL or p.id is not null)
 	),
 
 	-- маълумотой счёти асоси
