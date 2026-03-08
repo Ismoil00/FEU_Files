@@ -1,24 +1,10 @@
 
 
-	
-
-
-select reports.get_financial_reports_form_1_7 (
-	12,
-	'budget',
-	'2026-01-01',
-	'2026-04-04',
-	1000,
-	0
-);
 
 
 
 
-
-
-
-CREATE OR REPLACE FUNCTION reports.get_financial_reports_form_1_7 (
+CREATE OR REPLACE FUNCTION reports.get_financial_reports_form_1 (
 	_department_id integer,
 	_financing accounting.budget_distribution_type,
 	_date_from date,
@@ -45,9 +31,10 @@ BEGIN
 		from accounting.ledger
 		where draft is not true
 		and financing = _financing
-	
+		and left(debit::text, 1) in ('1', '2', '3')
+
 		union all
-	
+
 		select
 			credit as account,
 			0 as debit_amount,
@@ -56,6 +43,7 @@ BEGIN
 		from accounting.ledger
 		where draft is not true
 		and financing = _financing
+		and left(credit::text, 1) in ('1', '2', '3')
 	),
 	groupped as (
 		select
@@ -78,14 +66,14 @@ BEGIN
 	total_count as (
 		select count(*) as total from groupped
 	),
-		paginated as (
-		select 
-			account, 
-			start_balance, 
+	paginated as (
+		select
+			account,
+			start_balance,
 			end_balance
 		from groupped
 		order by account
-		limit _limit 
+		limit _limit
 		offset _offset
 	),
 	-- classify by first digit: 1=assets, 2=liabilities, 3=equities, 4=incomes, 5=expenses
@@ -135,32 +123,6 @@ BEGIN
 		) as arr
 		from with_category
 		where first_digit = '3'
-	),
-	incomes_agg as (
-		select jsonb_agg(
-			jsonb_build_object(
-				'account', account,
-				'prev_saldo_debit', (coalesce(start_balance, 0) >= 0),
-				'prev_saldo_amount', abs(coalesce(start_balance, 0)),
-				'next_saldo_debit', (coalesce(end_balance, 0) >= 0),
-				'next_saldo_amount', abs(coalesce(end_balance, 0))
-			) order by account
-		) as arr
-		from with_category
-		where first_digit = '4'
-	),
-	expenses_agg as (
-		select jsonb_agg(
-			jsonb_build_object(
-				'account', account,
-				'prev_saldo_debit', (coalesce(start_balance, 0) >= 0),
-				'prev_saldo_amount', abs(coalesce(start_balance, 0)),
-				'next_saldo_debit', (coalesce(end_balance, 0) >= 0),
-				'next_saldo_amount', abs(coalesce(end_balance, 0))
-			) order by account
-		) as arr
-		from with_category
-		where first_digit = '5'
 	)
 	select jsonb_build_object(
 		'status', 200,
@@ -172,14 +134,17 @@ BEGIN
 		),
 		'assets', coalesce((select arr from assets_agg), '[]'::jsonb),
 		'liabilities', coalesce((select arr from liabilities_agg), '[]'::jsonb),
-		'equities', coalesce((select arr from equities_agg), '[]'::jsonb),
-		'incomes', coalesce((select arr from incomes_agg), '[]'::jsonb),
-		'expenses', coalesce((select arr from expenses_agg), '[]'::jsonb)
+		'equities', coalesce((select arr from equities_agg), '[]'::jsonb)
 	) into _result;
 
 	 return _result;
 end;
 $BODY$;
+
+
+
+
+
 
 
 
