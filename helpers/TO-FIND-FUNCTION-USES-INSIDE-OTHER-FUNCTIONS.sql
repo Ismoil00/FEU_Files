@@ -1,8 +1,11 @@
--- Paste the function name below (schema-qualified or bare), then run the whole script.
--- Finds: functions, procedures, trigger functions, views, materialized views, rules.
+
+
+
+
+
 
 with search_name as (
-	select 'reports.get_financial_reports_form_1_1'::text as name  /* <-- PASTE FUNCTION NAME HERE */
+	select 'accounting.upsert_ledger'::text as name  /* <-- PASTE FUNCTION NAME HERE */
 ),
 parts as (
 	select
@@ -96,3 +99,12 @@ select
 	reference_location
 from all_refs
 order by object_type, object_schema, object_name;
+
+
+
+
+
+
+
+
+
