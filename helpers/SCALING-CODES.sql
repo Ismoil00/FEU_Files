@@ -1,34 +1,8 @@
 -- "generate_ledger_for_payroll_sheet"
 
--- "goods_return_table_data_validation"
-
 -- "handle_payroll_sheet_from_bank_and_cash"
 
--- "inventory_entry_table_data_management"
-
 -- "process_retention"
-
--- "upsert_advance_report_oplata"
-
--- "upsert_advance_report_prochee"
-
--- "upsert_advance_report_tmzos"
-
--- "upsert_cash_payment_order"
-
--- "upsert_cash_receipt_order"
-
--- "upsert_payment_order_incoming"
-
--- "upsert_payment_order_outgoing"
-
--- "upsert_product_transfer"
-
--- "upsert_warehouse_incoming"
-
--- "upsert_warehouse_outgoing"
-
--- "upsert_warehouse_services"
 
 -- "create_pensioners_payroll"
 
@@ -47,9 +21,6 @@
 
 
 
-select * from accounting.ledger
-where id > 2299
-order by id
 
 
 select parent_id from commons.department
@@ -84,29 +55,15 @@ SELECT accounting.upsert_ledger(
 
 
 
-select * from accounting.payment_order_incoming order by id
-
-select * from accounting.payment_order_outgoing order by id
-
-select * from accounting.cash_payment_order order by id
-
-select * from accounting.cash_receipt_order order by id
-
-select * from accounting.advance_report_prochee order by id
+select * from accounting.ledger
+where id > 2332
+order by id
 
 
 
-
-
-
-
-
-
-
-
-
-
-
+select * from accounting.product_transfer
+-- where id > 716
+order by id
 
 
 
