@@ -4,8 +4,6 @@
 
 -- "process_retention"
 
--- "create_pensioners_payroll"
-
 ----------------------------------------------------------
 
 /*

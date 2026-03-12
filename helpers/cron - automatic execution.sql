@@ -2,31 +2,57 @@
 
 select * from cron.job;
 
-SELECT * FROM cron.job_run_details
-ORDER BY end_time DESC
-LIMIT 10;
+SELECT
+    j.jobname,
+    d.runid,
+    d.start_time,
+    d.end_time,
+    d.status,
+    d.return_message,
+    d.command
+FROM cron.job_run_details d
+JOIN cron.job j ON j.jobid = d.jobid
+ORDER BY d.start_time DESC;
 
-SELECT jobid, jobname, database, username
-FROM cron.job
-
-
-/* PENSION SECTION */
-
-SELECT cron.unschedule('tesing-cron-with-function');
+/* PENSION AMOUNT AUTOMATIC  CALCULATION */
+CREATE OR REPLACE FUNCTION pension.run_pension_amount_recalculation_on_month_end()
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF EXTRACT(DAY FROM (current_date + interval '1 day')) = 1 THEN
+        PERFORM pension.automatic_pension_amount_recalculation();
+    END IF;
+END;
+$$;
 
 SELECT cron.schedule(
-    'monthly-pensioners-amount-update',
-    '0 0 1 * *',
-    $$SELECT pension.automatic_pension_amount_recalculation()$$
+    'pension-amount-monthly-recalculation',
+    '59 22 * * *',
+    $$SELECT pension.run_pension_amount_recalculation_on_month_end()$$
 );
 
 
-select * from pension.pensioner
-where updated->>'user_id' = 'pension-amount-monthly-recalculation'
+/* PAYROLL AUTOMATIC CALCULATION */
+SELECT cron.schedule(
+    'monthly-pensioners-payroll-calculation',
+    '59 23 * * *',
+    $$SELECT pension.run_pensioners_payroll_on_month_end()$$
+);
+
+CREATE OR REPLACE FUNCTION pension.run_pensioners_payroll_on_month_end()
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF EXTRACT(DAY FROM (current_date + interval '1 day')) = 1 THEN
+        PERFORM pension.create_pensioners_payroll_automatically();
+    END IF;
+END;
+$$;
 
 
 /* USD-EXCHANGE ZONE */
-
 select * from commons.usd_exchange
 
 CREATE OR REPLACE FUNCTION commons.update_usd_exchange(
