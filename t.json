@@ -1,0 +1,175 @@
+{
+  "status": 200,
+  "assets": [
+    {
+      "account": "141110",
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    },
+    {
+      "account": "141120",
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    },
+    {
+      "account": "141210",
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    },
+    {
+      "others": true,
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    }
+  ],
+  "long_term_assets": [
+    {
+      "account": "141500",
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    },
+    {
+      "account": "144000",
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    },
+    {
+      "account": "146000",
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    },
+    {
+      "others": true,
+
+      "prev_saldo_total_amount": 482417,
+      "prev_saldo_special_amount": 0,
+
+      "debit_total_amount": 482417,
+      "debit_special_amount": 0,
+
+      "credit_total_amount": 0,
+      "credit_special_amount": 0,
+
+      "depreciation_total_amount": 364711,
+      "depreciation_special_amount": 0,
+
+      "revaluation_total_amount": 0,
+      "revaluation_special_amount": 0,
+
+      "next_saldo_total_amount": 117706.15,
+      "next_saldo_special_amount": 0
+    }
+  ]
+}
