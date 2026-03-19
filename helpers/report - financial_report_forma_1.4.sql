@@ -1,3 +1,31 @@
+
+
+
+select reports.get_financial_reports_form_1_4(
+	12,
+	'2026-01-01',
+	'2026-04-04'
+);
+
+
+
+select * from accounting.ledger
+where debit in (
+	131100, 131210, 131211, 
+		131212, 131213, 131214, 
+		131215, 131216, 131217, 
+		131218, 131219, 131250, 
+		131000
+) or credit in (
+131100, 131210, 131211, 
+		131212, 131213, 131214, 
+		131215, 131216, 131217, 
+		131218, 131219, 131250, 
+		131000
+);
+
+
+
 CREATE OR REPLACE FUNCTION reports.get_financial_reports_form_1_4(
 	_department_id integer,
 	_date_from date,
@@ -11,7 +39,13 @@ AS $BODY$
 DECLARE
 	_result jsonb;
 	-- accounts for form 1.4
-	form_accounts int[] := array[131100, 131210, 131211, 131212, 131213, 131214, 131215, 131216, 131217, 131218, 131219, 131250, 131000];
+	form_accounts int[] := array[
+		131100, 131210, 131211, 
+		131212, 131213, 131214, 
+		131215, 131216, 131217, 
+		131218, 131219, 131250, 
+		131000
+	];
 BEGIN
 
 	/* MAIN QUERY */
@@ -96,3 +130,7 @@ BEGIN
 	RETURN _result;
 END;
 $BODY$;
+
+
+
+
